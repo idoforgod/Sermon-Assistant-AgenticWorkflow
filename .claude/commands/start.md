@@ -1,6 +1,6 @@
 # /start — Smart Workflow Router
 
-Universal entry point for all workflows. Detects user intent and routes to the appropriate workflow with user mode selection.
+설교연구 워크플로우 진입점. 실행 모드를 선택한 후 바로 워크플로우를 시작합니다.
 
 ## Natural Language Triggers
 
@@ -13,14 +13,24 @@ This command is invoked when the user says any of:
 
 ## Execution Protocol
 
-### Step 1: User Mode Guide (항상 먼저 표시)
+### Step 1: Intent Detection (P4 적용)
+
+If the user's message already contains passage/theme info AND mode preference (e.g., "시편 23편으로 설교 준비해줘"), skip the mode guide and proceed directly to Step 3 with Interactive as default mode.
+
+Otherwise, proceed to Step 2.
+
+### Step 2: User Mode Guide
 
 Present the following guide to the user:
 
 ```
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  AgenticWorkflow — 시작 안내
+  설교연구 워크플로우 — 시작 안내
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  11명의 박사급 전문 에이전트가 체계적으로 설교를 준비합니다.
+  입력: 주제/테마 | 본문(Pericope) | 설교시리즈
+  출력: 연구 패키지 + 아웃라인 + 설교 원고
 
 [실행 모드 선택]
 
@@ -42,53 +52,19 @@ Present the following guide to the user:
   * 모드 조합 가능: "Autopilot + ULW" = 자동이면서 최대 철저함
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-[사용 가능한 워크플로우]
-
-  A. 설교연구 워크플로우 (Sermon Research Workflow)
-     11명의 박사급 전문 에이전트가 체계적으로 설교를 준비합니다.
-     입력: 주제/테마 | 본문(Pericope) | 설교시리즈
-     출력: 연구 패키지 + 아웃라인 + 설교 원고
-
-  B. 워크플로우 생성기 (Workflow Generator)
-     새로운 워크플로우를 설계하고 구현합니다.
-     입력: 자동화하려는 작업 설명
-     출력: workflow.md + 에이전트 + 스킬 + 커맨드
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
 
-### Step 2: Collect User Selection
+Wait for the user to choose an execution mode. If the user just says "1", "2", "3", or mode name, accept it and proceed.
 
-Wait for the user to choose:
-1. **Execution mode**: Interactive (default) / Autopilot / ULW
-2. **Workflow**: A (Sermon) / B (Generator) / or describe what they want
+### Step 3: Execute Sermon Workflow
 
-If the user's original message already contains enough context to determine both (e.g., "시편 23편으로 설교 준비해줘"), skip redundant questions and proceed.
+Apply mode settings and execute `/sermon-start`:
 
-Apply P4 (질문 설계 규칙): If intent is clear, don't ask unnecessary questions.
+| Mode selection | Action |
+|----------------|--------|
+| **Interactive** (default) | Execute `/sermon-start` with the user's input |
+| **Autopilot** | Set `autopilot.enabled: true` in state.yaml, then execute `/sermon-start` |
+| **ULW** | Activate ULW overlay per `docs/protocols/ulw-mode.md`, then execute `/sermon-start` |
+| **Autopilot + ULW** | Both settings applied, then execute `/sermon-start` |
 
-### Step 3: Route to Workflow
-
-Based on selection:
-
-| Selection | Action |
-|-----------|--------|
-| **A (Sermon)** | Execute `/sermon-start` with the user's input |
-| **B (Generator)** | Invoke `workflow-generator` skill |
-| **Mode includes "autopilot"** | Set `autopilot.enabled: true` in state.yaml |
-| **Mode includes "ulw"** | Activate ULW overlay per `docs/protocols/ulw-mode.md` |
-
-### Step 4: Confirm and Begin
-
-Before routing, confirm:
-```
-[선택 확인]
-  워크플로우: {selected_workflow}
-  실행 모드: {selected_mode}
-  입력: {user_input_summary}
-
-  진행하시겠습니까? (Y/n)
-```
-
-If user confirms (or in Autopilot mode), proceed to the selected workflow entry point.
+No separate confirmation step — proceed immediately after mode selection.
