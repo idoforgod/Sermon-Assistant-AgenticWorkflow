@@ -28,6 +28,7 @@ Orchestrator (this session)
 3. Generate session.json: `_sermon_lib.generate_session_json(mode, input)`
 4. Generate checklist: `_sermon_lib.generate_checklist()` → write to `todo-checklist.md`
 5. Initialize state.yaml with sermon workflow fields
+6. Validate sermon SOT: `_sermon_lib.validate_sermon_sot_schema(state["workflow"]["sermon"])`
 6. Check `user-resource/` for user-provided materials
 
 ### Phase 1: Research
@@ -117,6 +118,15 @@ At each HITL checkpoint:
 4. `/sermon-finalize` → HITL-5b (Context Reset Point)
 5. If approved: `@sermon-writer` → sermon-final.md
 
+## SOT Schema Validation
+
+Call `_sermon_lib.validate_sermon_sot_schema(state["workflow"]["sermon"])` at these points:
+1. **Phase 0**: After initializing state.yaml (step 6 above)
+2. **After each HITL checkpoint**: When user decisions update sermon fields
+3. **After gate completion**: When `completed_gates` is updated
+
+If validation returns errors, fix the SOT before proceeding.
+
 ## SOT Schema (state.yaml additions for sermon workflow)
 
 ```yaml
@@ -136,7 +146,9 @@ workflow:
 
 ## Error Handling
 
-When a sub-agent returns a failure tag:
+### Agent-Level Failures
+
+When a sub-agent returns a `[FAILURE:...]` tag:
 1. Parse: `_sermon_lib.parse_agent_failure(output)`
 2. Get handler: `_sermon_lib.get_failure_handler(failure_type)`
 3. Execute handler action:
@@ -145,6 +157,31 @@ When a sub-agent returns a failure tag:
    - `request_retry`: Re-run agent with corrected input
    - `present_both_views`: Include both perspectives in output
    - `return_in_scope_only`: Accept in-scope portion only
+
+### Workflow-Level Error Handlers (workflow.md §error_handlers)
+
+These handle systemic issues that span multiple agents:
+
+1. **`on_research_incomplete`** — When agents in a wave fail to complete:
+   ```python
+   result = _sermon_lib.handle_research_incomplete(completed_agents, expected_agents)
+   # result["action"] == "partial_proceed" if ≥50% completed
+   # result["action"] == "abort" if <50% completed
+   ```
+
+2. **`on_validation_failure`** — When a Cross-Validation Gate fails:
+   ```python
+   result = _sermon_lib.handle_validation_failure(gate_name, structural_passed, semantic_passed, findings)
+   # result["action"] == "request_human_review"
+   # Present result["summary"] to user for decision
+   ```
+
+3. **`on_srcs_below_threshold`** — When SRCS scores fall below threshold (70):
+   ```python
+   result = _sermon_lib.handle_srcs_below_threshold(agent_results, threshold=70.0)
+   # result["action"] == "flag_for_review" if any agent below threshold
+   # result["flagged_agents"] lists which agents need attention
+   ```
 
 ## Gate Enforcement
 
@@ -170,3 +207,4 @@ When context resets mid-workflow:
 - `prompt/workflow.md` — Full workflow definition
 - `.claude/agents/references/gra-compliance.md` — GRA protocol
 - `.claude/hooks/scripts/_sermon_lib.py` — Deterministic functions
+  - Note: `workflow.md` references `checklist_manager.py` (§996); this maps to `_sermon_lib.py` functions (`generate_checklist()`, `update_checklist()`, `check_pending_gate()`, etc.)

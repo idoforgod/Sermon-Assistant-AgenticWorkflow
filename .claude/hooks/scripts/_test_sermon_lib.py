@@ -60,7 +60,11 @@ from _sermon_lib import (
     validate_gate_result,
     validate_gate_structure,
     validate_grounded_claim,
+    validate_sermon_sot_schema,
     validate_srcs_output,
+    handle_research_incomplete,
+    handle_validation_failure,
+    handle_srcs_below_threshold,
 )
 
 
@@ -713,6 +717,145 @@ class TestUtilities(unittest.TestCase):
         }
         report = format_srcs_report(agent_results)
         self.assertIn("Below Threshold", report)
+
+
+# ===================================================================
+# 11. Sermon SOT Schema Validation Tests
+# ===================================================================
+
+class TestSermonSotSchema(unittest.TestCase):
+
+    def test_valid_sermon_state(self):
+        state = {
+            "mode": "passage",
+            "passage": "Psalm 23:1-6",
+            "output_dir": "sermon-output/test",
+            "completed_gates": ["gate-1"],
+            "srcs_threshold": 70,
+        }
+        warnings = validate_sermon_sot_schema(state)
+        self.assertEqual(warnings, [])
+
+    def test_invalid_mode(self):
+        state = {"mode": "invalid"}
+        warnings = validate_sermon_sot_schema(state)
+        self.assertTrue(any("mode" in w for w in warnings))
+
+    def test_invalid_gate(self):
+        state = {"completed_gates": ["gate-1", "gate-99"]}
+        warnings = validate_sermon_sot_schema(state)
+        self.assertTrue(any("gate-99" in w for w in warnings))
+
+    def test_invalid_threshold(self):
+        state = {"srcs_threshold": 150}
+        warnings = validate_sermon_sot_schema(state)
+        self.assertTrue(any("srcs_threshold" in w for w in warnings))
+
+    def test_empty_state(self):
+        warnings = validate_sermon_sot_schema({})
+        self.assertEqual(warnings, [])
+
+    def test_none_state(self):
+        warnings = validate_sermon_sot_schema(None)
+        self.assertEqual(warnings, [])
+
+
+# ===================================================================
+# 12. Workflow-Level Error Handler Tests
+# ===================================================================
+
+class TestWorkflowLevelHandlers(unittest.TestCase):
+
+    def test_research_incomplete_detects_missing(self):
+        result = handle_research_incomplete(
+            completed_agents=["original-text-analyst", "manuscript-comparator"],
+            expected_agents=WAVE_AGENTS["wave-1"],
+        )
+        self.assertEqual(result["action"], "partial_proceed")
+        self.assertTrue(result["notify"])
+        self.assertEqual(len(result["missing_agents"]), 2)
+        self.assertIn("biblical-geography-expert", result["missing_agents"])
+
+    def test_research_incomplete_all_complete(self):
+        result = handle_research_incomplete(
+            completed_agents=WAVE_AGENTS["wave-1"],
+            expected_agents=WAVE_AGENTS["wave-1"],
+        )
+        self.assertEqual(result["missing_agents"], [])
+
+    def test_validation_failure_structural(self):
+        result = handle_validation_failure(
+            gate_name="gate-1",
+            structural_passed=False,
+            semantic_passed=True,
+        )
+        self.assertEqual(result["action"], "request_human_review")
+        self.assertIn("structural", result["failure_reasons"][0])
+
+    def test_validation_failure_semantic(self):
+        result = handle_validation_failure(
+            gate_name="gate-2",
+            structural_passed=True,
+            semantic_passed=False,
+            findings=["Contradiction between TA-001 and LA-003"],
+        )
+        self.assertEqual(result["action"], "request_human_review")
+        self.assertEqual(len(result["findings"]), 1)
+
+    def test_srcs_below_threshold_flags(self):
+        agent_results = {
+            "agent-a": {"average_score": 50.0, "below_threshold": [{"x": 1}]},
+            "agent-b": {"average_score": 80.0, "below_threshold": []},
+        }
+        result = handle_srcs_below_threshold(agent_results, threshold=70)
+        self.assertEqual(result["action"], "flag_for_review")
+        self.assertEqual(result["flagged_count"], 1)
+        self.assertTrue(result["requires_review"])
+
+    def test_srcs_all_above_threshold(self):
+        agent_results = {
+            "agent-a": {"average_score": 85.0, "below_threshold": []},
+        }
+        result = handle_srcs_below_threshold(agent_results, threshold=70)
+        self.assertEqual(result["flagged_count"], 0)
+        self.assertFalse(result["requires_review"])
+
+
+# ===================================================================
+# 13. Korean Hallucination Firewall Tests
+# ===================================================================
+
+class TestKoreanHallucinationFirewall(unittest.TestCase):
+
+    def test_korean_block_all_scholars(self):
+        text = "모든 학자가 동의하는 바와 같이"
+        findings = check_hallucination_firewall(text)
+        block = [f for f in findings if f["level"] == "BLOCK"]
+        self.assertGreater(len(block), 0)
+
+    def test_korean_block_no_exception(self):
+        text = "예외 없이 모든 경우에"
+        findings = check_hallucination_firewall(text)
+        block = [f for f in findings if f["level"] == "BLOCK"]
+        self.assertGreater(len(block), 0)
+
+    def test_korean_block_universally(self):
+        text = "보편적으로 인정되는 사실"
+        findings = check_hallucination_firewall(text)
+        block = [f for f in findings if f["level"] == "BLOCK"]
+        self.assertGreater(len(block), 0)
+
+    def test_korean_block_no_dissent(self):
+        text = "반론의 여지가 없는 결론"
+        findings = check_hallucination_firewall(text)
+        block = [f for f in findings if f["level"] == "BLOCK"]
+        self.assertGreater(len(block), 0)
+
+    def test_korean_safe_text(self):
+        text = "일부 학자들은 이 해석에 동의하지만, 다른 견해도 존재합니다."
+        findings = check_hallucination_firewall(text)
+        block = [f for f in findings if f["level"] == "BLOCK"]
+        self.assertEqual(len(block), 0)
 
 
 if __name__ == "__main__":

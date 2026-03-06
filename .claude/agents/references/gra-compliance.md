@@ -46,6 +46,10 @@ Before finalizing ANY claim, check your text against these rules:
 - "Without (any) exception"
 - "Universally accepted"
 - "No scholar disagrees"
+- "모든 학자가 동의" / "모든 학자들이 합의"
+- "예외 없이"
+- "보편적으로 인정"
+- "반론의 여지가 없" / "반론이 없"
 
 ### REQUIRE_SOURCE — Add source or remove
 - "Exactly N" (specific numbers need citation)

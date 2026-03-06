@@ -8,13 +8,13 @@ SOT Compliance: state.yaml read-only (writes are Orchestrator's job).
 _context_lib.py Independence: Zero imports from _context_lib.py. Zero coupling.
 
 Functions grouped by domain:
-  1. Schema Validation (GroundedClaim, SRCS output)
+  1. Schema Validation (GroundedClaim, SRCS output, sermon SOT schema)
   2. Hallucination Firewall (regex-based pattern blocking)
   3. SRCS Scoring (4-axis mathematical calculation)
   4. Cross-Validation Gate (structural validation only)
-  5. Checklist Management (120-step todo-checklist.md)
+  5. Checklist Management (130-step todo-checklist.md per workflow.md table)
   6. Session Initialization (Phase 0 deterministic setup)
-  7. Error Handling (5 failure types — detection + routing)
+  7. Error Handling (agent-level 5 types + workflow-level 3 handlers)
 
 Reference: prompt/workflow.md (Sermon Research Workflow v2.0)
 """
@@ -518,6 +518,66 @@ def calculate_agent_srcs(
     }
 
 
+def validate_sermon_sot_schema(sermon_state: dict[str, Any]) -> list[str]:
+    """Validate sermon-specific fields in state.yaml.
+
+    Complements _context_lib.py:validate_sot_schema() which handles
+    the base workflow schema. This validates the `sermon:` namespace.
+
+    Args:
+        sermon_state: The `workflow.sermon` sub-dict from state.yaml
+
+    Returns: list of warning strings (empty = valid)
+    """
+    warnings: list[str] = []
+    if not sermon_state or not isinstance(sermon_state, dict):
+        return warnings
+
+    # SM-1: mode — must be one of INPUT_MODES
+    mode = sermon_state.get("mode")
+    if mode is not None and mode not in INPUT_MODES:
+        warnings.append(
+            f"sermon.mode '{mode}' invalid. Must be one of: {sorted(INPUT_MODES)}"
+        )
+
+    # SM-2: passage — must be non-empty string if present
+    passage = sermon_state.get("passage")
+    if passage is not None:
+        if not isinstance(passage, str) or not passage.strip():
+            warnings.append("sermon.passage must be a non-empty string")
+
+    # SM-3: output_dir — must be non-empty string if present
+    output_dir = sermon_state.get("output_dir")
+    if output_dir is not None:
+        if not isinstance(output_dir, str) or not output_dir.strip():
+            warnings.append("sermon.output_dir must be a non-empty string")
+
+    # SM-4: completed_gates — must be list of valid gate names
+    gates = sermon_state.get("completed_gates")
+    if gates is not None:
+        valid_gates = set(WAVE_GATE_MAP.keys())
+        if not isinstance(gates, list):
+            warnings.append("sermon.completed_gates must be a list")
+        else:
+            for g in gates:
+                if g not in valid_gates:
+                    warnings.append(
+                        f"sermon.completed_gates contains unknown gate '{g}'"
+                    )
+
+    # SM-5: srcs_threshold — must be number 0-100
+    threshold = sermon_state.get("srcs_threshold")
+    if threshold is not None:
+        if not isinstance(threshold, (int, float)):
+            warnings.append("sermon.srcs_threshold must be a number")
+        elif not (0 <= threshold <= 100):
+            warnings.append(
+                f"sermon.srcs_threshold must be 0-100, got {threshold}"
+            )
+
+    return warnings
+
+
 def validate_srcs_output(srcs_result: dict[str, Any]) -> list[str]:
     """Validate SRCS evaluation output structure.
 
@@ -973,6 +1033,94 @@ def get_failure_handler(failure_type: str) -> Optional[dict[str, Any]]:
     return FAILURE_HANDLERS.get(failure_type)
 
 
+# --- Workflow-level error handlers (workflow.md:1029-1040) ---
+
+def handle_research_incomplete(
+    completed_agents: list[str],
+    expected_agents: list[str],
+) -> dict[str, Any]:
+    """Handle on_research_incomplete: some agents did not produce output.
+
+    Reference: workflow.md:1029-1032 (action: partial_proceed)
+    Returns action descriptor for the Orchestrator.
+    """
+    missing = [a for a in expected_agents if a not in completed_agents]
+    return {
+        "action": "partial_proceed",
+        "notify": True,
+        "missing_agents": missing,
+        "completed_count": len(completed_agents),
+        "expected_count": len(expected_agents),
+        "message": (
+            f"{len(missing)}개 에이전트 분석이 불완전합니다: "
+            f"{', '.join(missing)}. 계속 진행하시겠습니까?"
+        ),
+    }
+
+
+def handle_validation_failure(
+    gate_name: str,
+    structural_passed: bool,
+    semantic_passed: bool,
+    findings: Optional[list[str]] = None,
+) -> dict[str, Any]:
+    """Handle on_validation_failure: gate validation failed.
+
+    Reference: workflow.md:1034-1035 (action: request_human_review)
+    Returns action descriptor for the Orchestrator.
+    """
+    failure_reasons = []
+    if not structural_passed:
+        failure_reasons.append("structural check failed")
+    if not semantic_passed:
+        failure_reasons.append("semantic consistency check failed")
+
+    return {
+        "action": "request_human_review",
+        "gate": gate_name,
+        "structural_passed": structural_passed,
+        "semantic_passed": semantic_passed,
+        "failure_reasons": failure_reasons,
+        "findings": findings or [],
+        "message": (
+            f"{gate_name} 검증 실패: {', '.join(failure_reasons)}. "
+            f"사람의 검토가 필요합니다."
+        ),
+    }
+
+
+def handle_srcs_below_threshold(
+    agent_results: dict[str, dict[str, Any]],
+    threshold: float = 70.0,
+) -> dict[str, Any]:
+    """Handle on_srcs_below_threshold: SRCS scores below minimum.
+
+    Reference: workflow.md:1037-1039 (action: flag_for_review, threshold: 70)
+    Returns action descriptor with flagged agents/claims.
+    """
+    flagged_agents: list[dict[str, Any]] = []
+    for agent, result in agent_results.items():
+        avg = result.get("average_score", 0)
+        if avg < threshold:
+            flagged_agents.append({
+                "agent": agent,
+                "average_score": avg,
+                "below_threshold_claims": result.get("below_threshold", []),
+            })
+
+    return {
+        "action": "flag_for_review",
+        "threshold": threshold,
+        "flagged_count": len(flagged_agents),
+        "flagged_agents": flagged_agents,
+        "requires_review": len(flagged_agents) > 0,
+        "message": (
+            f"{len(flagged_agents)}개 에이전트의 SRCS 점수가 "
+            f"기준({threshold}) 미만입니다."
+        ) if flagged_agents else "모든 에이전트 SRCS 점수 기준 충족.",
+    }
+
+
 # ===================================================================
 # 9. WAVE BOUNDARY DETECTION
 # ===================================================================
@@ -994,12 +1142,6 @@ def get_current_wave(step: int) -> Optional[str]:
                 return "wave-3"
             elif "Wave 4" in section_name:
                 return "wave-4"
-            elif "Gate 1" in section_name:
-                return "gate-1"
-            elif "Gate 2" in section_name:
-                return "gate-2"
-            elif "Gate 3" in section_name:
-                return "gate-3"
             else:
                 return section_name
         current = end + 1
