@@ -6,8 +6,9 @@ Review draft and finalize the sermon manuscript.
 ## Context Reset Point: Yes
 
 ## Display
-- Sermon draft (sermon-draft.md)
-- Quality review report (review-report.md from @sermon-reviewer)
+- Sermon draft (sermon-draft.ko.md — 한국어 번역본)
+- Quality review report (review-report.ko.md — 한국어 번역본)
+- Note: 영문 원본은 `.md`, 한국어 번역본은 `.ko.md`로 병렬 제공
 
 ## Options
 ```

@@ -277,7 +277,7 @@ claims:
 │     - HITL 스냅샷 (context_snapshots)                │
 ├─────────────────────────────────────────────────────┤
 │  2. Todo File: todo-checklist.md                     │
-│     - 120단계 체크리스트                              │
+│     - 155단계 체크리스트                              │
 │     - 완료 표시 [x] / 미완료 [ ]                     │
 │     - 마지막 작업 지점 파악용                          │
 ├─────────────────────────────────────────────────────┤
@@ -335,8 +335,9 @@ Phase 3 ──▶ HITL-5a (포맷) ──▶ HITL-5b (최종 승인)
 | 방화벽 | `check_hallucination_firewall()` | Regex 기반 패턴 차단 |
 | SRCS 점수 | `calculate_srcs_score()` | 4축 수학적 계산 |
 | Gate 검증 | `validate_gate_structure()`, `validate_gate_result()` | 교차검증 게이트 구조 검증 |
-| 체크리스트 | `generate_checklist()`, `update_checklist()` | 120단계 체크리스트 관리 |
-| 세션 초기화 | `create_output_structure()`, `generate_session_json()` | Phase 0 설정 |
+| 체크리스트 | `generate_checklist()`, `update_checklist()` | 155단계 체크리스트 관리 |
+| 세션 초기화 | `initialize_sermon_output()` (P1 Master) | Phase 0 전체 설정 (디렉토리·세션·체크리스트 일괄) |
+| 컨텍스트 해석 | `resolve_sermon_context()` (P1 Master) | Resume/Status 경로·상태 일괄 해석 |
 | 에러 처리 | `handle_research_incomplete()`, `handle_validation_failure()` | 5종 에이전트 에러 + 3종 워크플로우 에러 |
 | 에이전트 디스패치 | `build_research_agent_prompt()`, `resolve_dependency_files()` | 의존성 해결 + 프롬프트 생성 |
 | 출력 검증 | `validate_agent_output()`, `extract_claims_from_output()` | P1 클레임 추출 + 통합 파이프라인 |
@@ -348,10 +349,13 @@ Orchestrator가 반드시 `_sermon_lib.py` 함수를 사용해야 하는 지점:
 
 | 지점 | 금지 행위 | 필수 함수 |
 |------|---------|---------|
+| Phase 0 초기화 | 개별 함수 수동 조합 | `initialize_sermon_output()` (P1 Master) |
 | 에이전트 프롬프트 생성 | 수동 프롬프트 작성 | `build_research_agent_prompt()` |
 | 에이전트 출력 검증 | 수동 클레임 읽기 | `validate_agent_output()` |
 | Gate 통과 판정 | AI 단독 판정 | `validate_gate_structure()` + AI + `validate_gate_result()` |
 | Gate 완료 기록 | 수동 SOT 수정 | `record_gate_completion()` |
+| 번역 배치 실행 | 수동 파일 매핑 | `prepare_translation_batch()` → `finalize_translation_batch()` |
+| Resume/Status 경로 해석 | 수동 경로 조합 | `resolve_sermon_context()` (P1 Master) |
 
 ---
 

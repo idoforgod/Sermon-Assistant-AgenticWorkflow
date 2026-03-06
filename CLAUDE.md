@@ -54,6 +54,7 @@ AgenticWorkflow/
 │   ├── settings.json                ← Hook 설정
 │   ├── agents/
 │   │   ├── translator.md            (영→한 번역, glossary 기반)
+│   │   ├── sermon-translator.md     (신학 전문 번역, theological-glossary 기반)
 │   │   ├── reviewer.md              (적대적 리뷰어, Enhanced L2)
 │   │   └── fact-checker.md          (사실 검증, claim-by-claim)
 │   ├── commands/
@@ -92,6 +93,7 @@ AgenticWorkflow/
 │       ├── workflow-generator/      (워크플로우 설계·생성)
 │       └── doctoral-writing/        (박사급 학술 글쓰기)
 ├── translations/glossary.yaml       ← 번역 용어 사전
+├── translations/theological-glossary.yaml ← 신학 번역 용어 사전 (SOT: Orchestrator)
 ├── prompt/                          ← 프롬프트 자료
 └── coding-resource/                 ← 이론적 기반 자료
 ```
@@ -157,7 +159,7 @@ AgenticWorkflow/
 
 - **프레임워크 문서·사용자 대화**: 한국어
 - **워크플로우 실행**: 영어 (AI 성능 극대화 — 절대 기준 1 근거)
-- **최종 산출물**: 영어 원본 + 한국어 번역 쌍 (`@translator` 서브에이전트)
+- **최종 산출물**: 영어 원본 + 한국어 번역 쌍 (`@translator` / `@sermon-translator`)
 - **기술 용어**: 영어 유지 (SOT, Agent Team, Hooks 등)
 - **시각화**: Mermaid 다이어그램 선호
 - **깊이**: 간략 요약보다 포괄적·데이터 기반 서술 선호
@@ -165,6 +167,15 @@ AgenticWorkflow/
 ### 번역 프로토콜
 
 워크플로우에 `Translation: @translator`로 표기된 단계에 한해 `@translator` 서브에이전트 호출. 번역 대상은 텍스트 콘텐츠(`.md`, `.txt`)만. SOT `outputs.step-N-ko`에 기록. 용어 사전 `translations/glossary.yaml` 자동 유지.
+
+#### 설교 워크플로우 전용 번역
+- **에이전트**: `@sermon-translator` (신학 전문 번역 — `@translator` DNA 상속 + 도메인 특화)
+- **용어 사전**: `translations/theological-glossary.yaml` (SOT: Orchestrator만 쓰기)
+- **타이밍**: Wave Gate 통과 후 배치 번역 (Gate 실패 시 번역 낭비 방지)
+- **출력**: 모든 `.md` 결과물에 대응하는 `.ko.md` 파일 생성
+- **P1 함수**: `_sermon_lib.py`의 `get_translation_targets()`, `build_translation_prompt()`, `validate_translation_output()`, `extract_translation_pacs()`, `should_retranslate()`, `collect_discovered_terms()`, `merge_glossary_terms()`
+- **P1 Master 함수** (2-Function Pattern): `check_pending_translation()`, `prepare_translation_batch()`, `finalize_translation_batch()` — 개별 함수 8개를 결정론적으로 조합, AI 판단 최소화
+- **pACS**: 4축 (Ft=충실도, Ct=완전성, Nt=자연스러움, Tt=신학 정확도), grade = min(Ft,Ct,Nt,Tt)
 
 ## 스킬 개발 규칙
 

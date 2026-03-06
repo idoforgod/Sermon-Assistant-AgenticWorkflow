@@ -236,6 +236,7 @@ def _check_scripts_completeness(scripts_dir):
             if (entry.endswith(".py")
                     and not entry.startswith("__")
                     and not entry.startswith("test_")
+                    and not entry.startswith("_test_")
                     and entry not in _SELF_VALIDATING
                     and os.path.isfile(os.path.join(scripts_dir, entry))):
                 actual_files.add(entry)
@@ -367,7 +368,7 @@ def _check_sot_write_safety(scripts_dir):
     SOT_FILENAMES = ("state.yaml", "state.yml", "state.json")
     SOT_MARKERS = SOT_FILENAMES + ("sot_paths",)
     # Scripts that legitimately reference SOT for read-only access
-    SOT_AWARE_SCRIPTS = {"_context_lib.py", "restore_context.py"}
+    SOT_AWARE_SCRIPTS = {"_context_lib.py", "restore_context.py", "query_workflow.py"}
     WRITE_RE = re.compile(
         r'open\s*\([^)]*["\'](?:w|a)'      # open(..., "w"...) or open(..., "a"...)
         r'|atomic_write\s*\('               # atomic_write(...)

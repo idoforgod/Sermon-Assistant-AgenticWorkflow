@@ -851,6 +851,8 @@ workflow:
 
 Translation pACS = min(Ft, Ct, Nt). 행동 트리거는 동일 (GREEN/YELLOW/RED).
 
+> **도메인 특화 번역 — `@sermon-translator`**: 설교 워크플로우에서는 `@translator` 대신 `@sermon-translator`를 사용하며, 신학 정확도 축(**Tt — Theological Accuracy**)이 추가된 4축 체계를 적용한다. Translation pACS = min(Ft, Ct, Nt, Tt). 상세: `.claude/agents/sermon-translator.md`, `translations/theological-glossary.yaml`.
+
 #### L2 Adversarial Review (Enhanced — Review: 필드 지정 단계)
 
 기존 L2 Calibration을 대체하는 강화된 품질 검증 계층이다. `@reviewer`(코드/산출물 비판적 분석, 읽기 전용) 및 `@fact-checker`(외부 사실 검증, 웹 접근)가 독립적으로 산출물을 검토한다. 리뷰 결과는 P1 검증(`validate_review.py`)으로 결정론적 품질 보장된다.

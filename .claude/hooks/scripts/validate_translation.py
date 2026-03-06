@@ -91,7 +91,7 @@ def main():
         "T6": "Heading count mismatch: Korean translation headings differ > 20% from English source — check for missing/extra sections",
         "T7": "Code block count mismatch: Korean translation must preserve all code blocks from English source",
         "T8": "Glossary is stale — update translations/glossary.yaml with terms from this step",
-        "T9": "Fix translation pACS arithmetic: pACS must equal min(Ft, Ct, Nt). Recalculate and correct",
+        "T9": "Fix translation pACS arithmetic: pACS must equal min(Ft, Ct, Nt, Tt). Recalculate and correct",
         "RV1": "Review verdict must be PASS before translation — fix review issues first, re-run @reviewer, then translate",
     }
 

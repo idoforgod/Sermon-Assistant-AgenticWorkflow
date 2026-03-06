@@ -26,3 +26,9 @@ translations/*
 
 # Pytest cache
 .pytest_cache/
+
+# Sermon workflow runtime data (generated during workflow execution)
+sermon-output/
+state.yaml
+state.yml
+state.json

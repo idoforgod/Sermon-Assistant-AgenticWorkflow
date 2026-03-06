@@ -6,6 +6,7 @@ Select the sermon passage and configure research options.
 
 ## Display
 Present passage candidates (if Mode A) with suitability analysis.
+- Mode A: 한국어 번역본 (passage-candidates.ko.md) 기반으로 표시
 
 ## Options
 ```

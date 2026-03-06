@@ -9,6 +9,7 @@ Confirm the Big Idea and sermon title.
 - Big Idea options (2-3 from @message-synthesizer)
 - Central Proposition
 - Purpose Statement
+- 한국어 번역본 (core-message.ko.md) 병렬 참조
 
 ## Options
 ```

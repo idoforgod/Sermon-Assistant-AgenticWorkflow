@@ -6,9 +6,10 @@ Review all 11 research results and SRCS confidence report.
 ## Context Reset Point: Yes
 
 ## Display
-- 11 research results summary (from research-synthesis.md)
-- SRCS confidence report (confidence-report.md)
+- 11 research results summary (from research-synthesis.ko.md — 한국어 번역본)
+- SRCS confidence report (confidence-report.ko.md — 한국어 번역본)
 - Claims requiring review (below threshold)
+- Note: 영문 원본은 `.md`, 한국어 번역본은 `.ko.md`로 병렬 제공
 
 ## Options
 ```

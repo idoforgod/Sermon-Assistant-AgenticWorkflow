@@ -128,7 +128,7 @@ class TestAgentFilesExist:
             "rhetorical-analyst.md",
             "unified-srcs-evaluator.md", "research-synthesizer.md",
             "message-synthesizer.md", "outline-architect.md", "style-analyzer.md",
-            "sermon-writer.md", "sermon-reviewer.md",
+            "sermon-writer.md", "sermon-reviewer.md", "sermon-translator.md",
             "passage-finder.md", "series-analyzer.md",
         ]
         missing = []

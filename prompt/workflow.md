@@ -61,7 +61,7 @@
 │                                                              │
 │  2️⃣ Todo File (할 일 파일)                                  │
 │     📄 todo-checklist.md                                    │
-│     - 120단계 체크리스트                                     │
+│     - 155단계 체크리스트                                     │
 │     - 완료 표시 [x] / 미완료 [ ]                            │
 │     - 마지막 작업 지점 파악용                                │
 │                                                              │
@@ -77,11 +77,11 @@
 
 컨텍스트 리셋 시 자동 복구를 위한 체크포인트 시스템입니다.
 
-| 리셋 포인트          | 로드할 파일                                    | 목적                |
-| -------------------- | ---------------------------------------------- | ------------------- |
-| **HITL-2 후**  | session.json, research-synthesis.md, checklist | Planning Phase 진입 |
-| **HITL-3b 후** | session.json, outline.md, synthesis, checklist | Implementation 진입 |
-| **HITL-5b 후** | session.json, sermon-final.md, checklist       | 완료 확인           |
+| 리셋 포인트          | 로드할 파일                                                          | 목적                |
+| -------------------- | -------------------------------------------------------------------- | ------------------- |
+| **HITL-2 후**  | session.json, research-synthesis.md, research-synthesis.ko.md, checklist | Planning Phase 진입 |
+| **HITL-3b 후** | session.json, outline.md, outline.ko.md, synthesis, checklist            | Implementation 진입 |
+| **HITL-5b 후** | session.json, sermon-final.md, sermon-final.ko.md, checklist             | 완료 확인           |
 
 ---
 
@@ -103,7 +103,7 @@
 
 - `sermon-output/_temp/` 폴더 생성
 - `session.json` 초기화 (Context File)
-- `todo-checklist.md` 생성 (Todo File, 120단계)
+- `todo-checklist.md` 생성 (Todo File, 155단계)
 - `user-resource/` 폴더 확인 (사용자 참고 자료)
 
 ### 0-2. 사용자 리소스 관리
@@ -130,6 +130,7 @@
   - 각 본문의 적합성 근거 제시
   - 설교 난이도 및 청중 적합성 평가
 - **Output**: `passage-candidates.md`
+- **Translation**: `@sermon-translator` → `passage-candidates.ko.md` (HITL-1 전 자동 실행)
 
 #### 1-2. [Mode C] 시리즈 맥락 분석
 
@@ -139,6 +140,7 @@
   - 이전/이후 설교와의 연결점 분석
   - 시리즈 내 강조점 및 주의사항 도출
 - **Output**: `series-context.md`
+- **Translation**: `@sermon-translator` → `series-context.ko.md` (HITL-1 전 자동 실행)
 
 ### 2. (human) 본문 선정 및 옵션 설정
 
@@ -362,18 +364,48 @@
   - Context Reset 대비 Insights File 생성
 - **Output**: `research-synthesis.md`
 
+### 5.5. 연구 결과 한국어 번역 (Translation Layer)
+
+각 Wave의 Gate 통과 후, 해당 Wave의 연구 결과물을 한국어로 번역합니다.
+Wave 4 이후에는 `confidence-report.md`와 `research-synthesis.md`도 함께 번역합니다.
+
+- **Agent**: `@sermon-translator` (신학 전문 번역)
+- **Execution**: Wave별 병렬 번역 (P1 deterministic routing via `_sermon_lib.get_translation_targets()`)
+- **P1 Pipeline**:
+  1. `get_translation_targets(phase, output_dir)` → 번역 대상 결정
+  2. `build_translation_prompt(source, glossary, output_dir)` → 프롬프트 생성
+  3. `@sermon-translator` 실행 (병렬)
+  4. `validate_translation_output(source, translation)` → 구조 검증
+  5. `extract_translation_pacs(content)` → pACS 점수 추출 (Ft/Ct/Nt/Tt)
+  6. `should_retranslate(pacs, retry)` → RED 시 재번역 (최대 2회)
+  7. `collect_discovered_terms(files)` → 새 용어 수집
+  8. `merge_glossary_terms(glossary, terms)` → 용어 사전 업데이트 (Orchestrator만)
+- **Glossary**: `translations/theological-glossary.yaml` (read-only for translators, Orchestrator sole writer)
+- **Quality Gate**: Translation pACS = min(Ft, Ct, Nt, Tt) ≥ 70 (GREEN)
+- **Output**: 각 `.md` 파일에 대응하는 `.ko.md` 파일 (동일 디렉토리)
+
+```
+번역 타이밍:
+  Phase 0-A (Mode A) → passage-finder 완료 → 1파일 번역
+  Phase 0-C (Mode C) → series-analyzer 완료 → 1파일 번역
+  Wave 1 → Gate 1 통과 → 4파일 병렬 번역
+  Wave 2 → Gate 2 통과 → 3파일 병렬 번역
+  Wave 3 → Gate 3 통과 → 3파일 병렬 번역
+  Wave 4 → SRCS 완료 → 3파일 병렬 번역 (rhetorical + confidence + synthesis)
+```
+
 ### 6. (human) Research 결과 검토
 
 - **Checkpoint**: `HITL-2`
 - **Display**:
-  - 11개 연구 결과 종합 요약
-  - SRCS 신뢰도 보고서
+  - 11개 연구 결과 한국어 번역본 종합 요약
+  - SRCS 신뢰도 보고서 (한국어)
   - 검토 필요 클레임 목록
 - **Options**:
   ```
   [검토 방식]
   ○ 요약본만 확인 (권장)
-  ○ 전체 상세 보고서 확인
+  ○ 전체 상세 보고서 확인 (한국어 번역본)
   ○ 특정 영역 심층 확인: [영역 선택]
 
   [추가 연구 요청]
@@ -424,12 +456,13 @@
   - 설교 목적(Purpose Statement) 정의
   - 청중 맞춤 적용점 3-5개 도출
 - **Output**: `core-message.md`
+- **Translation**: `@sermon-translator` → `core-message.ko.md` (HITL-3b 전 자동 실행)
 
 ### 9. (human) 핵심 메시지 확정
 
 - **Checkpoint**: `HITL-3b`
 - **Display**:
-  - Big Idea 제안 (2-3개 옵션)
+  - Big Idea 제안 (2-3개 옵션, 한국어 — `core-message.ko.md`)
   - 중심명제 제안
   - 설교 목적 제안
 - **Options**:
@@ -463,11 +496,12 @@
     - 적용점
   - 서론/결론 방향 제시
 - **Output**: `sermon-outline.md`
+- **Translation**: `@sermon-translator` → `sermon-outline.ko.md` (HITL-4 전 자동 실행)
 
 ### 11. (human) 아웃라인 승인
 
 - **Checkpoint**: `HITL-4`
-- **Display**: 설교 아웃라인 전체
+- **Display**: 설교 아웃라인 전체 (한국어 — `sermon-outline.ko.md`)
 - **Options**:
   ```
   [아웃라인 검토]
@@ -552,6 +586,7 @@
     - 전환 문장
   - 원어 설명 시 청중 수준 고려
 - **Output**: `sermon-draft.md`
+- **Translation**: `@sermon-translator` → `sermon-draft.ko.md`
 
 ### 15. 품질 검토
 
@@ -564,11 +599,12 @@
   - 시간 배분 적절성 확인
   - 언어/문체 일관성 점검
 - **Output**: `review-report.md`
+- **Translation**: `@sermon-translator` → `review-report.ko.md` (HITL-5b 전 자동 실행)
 
 ### 16. (human) 초안 검토 및 수정 요청
 
 - **Checkpoint**: `HITL-5b`
-- **Display**: 설교 원고 초안 + 품질 검토 리포트
+- **Display**: 설교 원고 초안 + 품질 검토 리포트 (한국어 — `.ko.md` 번역본)
 - **Options**:
   ```
   [검토 결과]
@@ -591,6 +627,7 @@
 - **Agent**: `@sermon-writer`
 - **Task**: 피드백 반영하여 최종본 완성
 - **Output**: `sermon-final.md`
+- **Translation**: `@sermon-translator` → `sermon-final.ko.md`
 
 ---
 
@@ -708,32 +745,50 @@ Loop 3: 최종 분석 → 결론 도출
 ├── 📄 todo-checklist.md              # 진행 체크리스트 (Todo File)
 ├── 📁 research-package/              # 연구 자료 패키지
 │   ├── 01-original-text-analysis.md
+│   ├── 01-original-text-analysis.ko.md
 │   ├── 02-translation-manuscript-comparison.md
+│   ├── 02-translation-manuscript-comparison.ko.md
 │   ├── 03-structural-analysis.md
+│   ├── 03-structural-analysis.ko.md
 │   ├── 04-parallel-passage-analysis.md
+│   ├── 04-parallel-passage-analysis.ko.md
 │   ├── 05-theological-analysis.md
+│   ├── 05-theological-analysis.ko.md
 │   ├── 06-literary-analysis.md
+│   ├── 06-literary-analysis.ko.md
 │   ├── 07-rhetorical-analysis.md
+│   ├── 07-rhetorical-analysis.ko.md
 │   ├── 08-historical-cultural-context.md
+│   ├── 08-historical-cultural-context.ko.md
 │   ├── 09-keyword-study.md
+│   ├── 09-keyword-study.ko.md
 │   ├── 10-biblical-geography.md
-│   └── 11-historical-cultural-background.md
+│   ├── 10-biblical-geography.ko.md
+│   ├── 11-historical-cultural-background.md
+│   └── 11-historical-cultural-background.ko.md
 ├── 📄 research-synthesis.md          # 연구 종합본 (Insights File)
+├── 📄 research-synthesis.ko.md       # 연구 종합본 (한국어)
 ├── 📄 srcs-summary.json              # SRCS 평가 결과
 ├── 📄 confidence-report.md           # 신뢰도 보고서
+├── 📄 confidence-report.ko.md        # 신뢰도 보고서 (한국어)
 ├── 📄 core-message.md                # 핵심 메시지
+├── 📄 core-message.ko.md             # 핵심 메시지 (한국어)
 ├── 📄 sermon-outline.md              # 설교 아웃라인
+├── 📄 sermon-outline.ko.md           # 설교 아웃라인 (한국어)
 ├── 📄 style-profile.json             # 스타일 프로파일 (선택)
 ├── 📄 sermon-draft.md                # 설교 원고 초안
+├── 📄 sermon-draft.ko.md             # 설교 원고 초안 (한국어)
 ├── 📄 review-report.md               # 품질 검토 리포트
-└── 📄 sermon-final.md                # 최종 설교 원고
+├── 📄 review-report.ko.md            # 품질 검토 리포트 (한국어)
+├── 📄 sermon-final.md                # 최종 설교 원고
+└── 📄 sermon-final.ko.md             # 최종 설교 원고 (한국어)
 ```
 
 ---
 
 ## Claude Code Configuration
 
-### Sub-agents (25개)
+### Sub-agents (26개)
 
 ```yaml
 agents:
@@ -842,6 +897,11 @@ agents:
   style-analyzer:
     description: "사용자 설교 스타일 분석 전문가"
     expertise: "문체 분석, 스타일 프로파일링"
+
+  # Translation Layer
+  sermon-translator:
+    description: "신학 전문 영→한 번역 전문가"
+    expertise: "신학 번역, 교회 용어, 원어 음역"
 
   # Phase 3: Implementation
   sermon-writer:
@@ -992,7 +1052,7 @@ external_memory:
     insights_file: research-synthesis.md
 
   checklist:
-    total_steps: 120
+    total_steps: 155
     manager: scripts/checklist_manager.py
 
   context_reset_points:
@@ -1075,28 +1135,32 @@ error_handling:
 
 ---
 
-## 120-Step Workflow Checklist
+## 155-Step Workflow Checklist
 
-전체 워크플로우는 120개 세부 단계로 구성되며, `todo-checklist.md`에서 추적됩니다.
+전체 워크플로우는 155개 세부 단계로 구성되며, `todo-checklist.md`에서 추적됩니다.
 
 ### 단계 구성 요약
 
-| Phase                  | 단계 수 | 설명                |
-| ---------------------- | ------- | ------------------- |
-| Phase 0                | 6       | 세션 초기화         |
-| Phase 0-A              | 6       | 본문 탐색 (Mode A)  |
-| HITL-1                 | 3       | 본문 선정           |
-| Wave 1                 | 16      | 독립 분석           |
-| Wave 2                 | 12      | 의존 분석           |
-| Wave 3                 | 12      | 심층 분석           |
-| Wave 4                 | 6       | 통합 분석           |
-| HITL-2                 | 8       | 연구 검토           |
-| Phase 2 Planning       | 16      | 설교 설계           |
-| HITL-3a/3b             | 10      | 스타일/메시지 확정  |
-| Phase 2.5              | 4       | 스타일 분석         |
-| HITL-4                 | 3       | 아웃라인 승인       |
-| Phase 3 Implementation | 18      | 원고 작성           |
-| HITL-5a/5b             | 10      | 형식 설정/최종 승인 |
+| Phase                  | 단계 수 | 설명                    |
+| ---------------------- | ------- | ----------------------- |
+| Phase 0                | 6       | 세션 초기화             |
+| Phase 0-A              | 8       | 본문 탐색 (Mode A) +번역|
+| HITL-1                 | 3       | 본문 선정               |
+| Wave 1                 | 16      | 독립 분석               |
+| Wave 1 Translation     | 4       | Wave 1 번역             |
+| Wave 2                 | 12      | 의존 분석               |
+| Wave 2 Translation     | 3       | Wave 2 번역             |
+| Wave 3                 | 12      | 심층 분석               |
+| Wave 3 Translation     | 3       | Wave 3 번역             |
+| Wave 4                 | 6       | 통합 분석               |
+| Wave 4 Translation     | 3       | Wave 4 번역             |
+| HITL-2                 | 8       | 연구 검토               |
+| Phase 2 Planning       | 20      | 설교 설계 +번역         |
+| HITL-3a/3b             | 10      | 스타일/메시지 확정      |
+| Phase 2.5              | 4       | 스타일 분석             |
+| HITL-4                 | 3       | 아웃라인 승인           |
+| Phase 3 Implementation | 24      | 원고 작성 +번역         |
+| HITL-5a/5b             | 10      | 형식 설정/최종 승인     |
 
 ---
 
@@ -1106,3 +1170,4 @@ error_handling:
 | ------- | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 1.0.0   | 2025-01-15 | Initial release                                                                                                                                                                                                      |
 | 2.0.0   | 2026-01-18 | GRA Architecture, External Memory Strategy, 120-step checklist, Context Reset Model, Hallucination Firewall, Cross-Validation Gates, SRCS 4-axis evaluation, Style Analysis, /resume command, Unified SRCS Evaluator |
+| 2.1.0   | 2026-03-06 | Pervasive Korean Translation Layer — @sermon-translator sub-agent, theological-glossary.yaml, 155-step checklist, wave-boundary batch translation, 4-axis translation pACS (Ft/Ct/Nt/Tt), .ko.md output pairs       |

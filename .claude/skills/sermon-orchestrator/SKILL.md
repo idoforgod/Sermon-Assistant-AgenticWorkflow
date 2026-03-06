@@ -24,12 +24,20 @@ Orchestrator (this session)
 
 ### Phase 0: Initialization
 1. Detect input mode: `_sermon_lib.detect_input_mode(user_input)`
-2. Create output directory: `_sermon_lib.create_output_structure(base_dir)`
-3. Generate session.json: `_sermon_lib.generate_session_json(mode, input)`
-4. Generate checklist: `_sermon_lib.generate_checklist()` → write to `todo-checklist.md`
-5. Initialize state.yaml with sermon workflow fields
-6. Validate sermon SOT: `_sermon_lib.validate_sermon_sot_schema(state["workflow"]["sermon"])`
-6. Check `user-resource/` for user-provided materials
+2. **P1 Master — single call for all Phase 0 setup**:
+   ```python
+   result = _sermon_lib.initialize_sermon_output(user_input, mode, options)
+   # Creates: output directory (collision-safe), session.json, todo-checklist.md
+   # Returns: output_dir, session_path, checklist_path, state_yaml_sermon
+   ```
+3. Write `result["state_yaml_sermon"]` to state.yaml `workflow.sermon` section
+4. Validate sermon SOT: `_sermon_lib.validate_sermon_sot_schema(state["workflow"]["sermon"])`
+5. Check `user-resource/` for user-provided materials
+
+**CRITICAL**: Do NOT manually call `get_output_dir_name()`, `create_output_structure()`,
+`generate_session_json()`, or `generate_checklist()` individually. The P1 Master
+`initialize_sermon_output()` encapsulates all of these to prevent path hallucination.
+Use `result["output_dir"]` as the `output_dir` for all subsequent function calls.
 
 ### Phase 1: Research
 
@@ -183,6 +191,83 @@ These handle systemic issues that span multiple agents:
    # result["flagged_agents"] lists which agents need attention
    ```
 
+## Translation Protocol
+
+After each Gate pass and at key Phase 2/3 milestones, translate English outputs to Korean via `@sermon-translator`.
+
+### Translation Timing
+- **Wave N → Gate N pass → translate Wave N outputs** (batch, parallel)
+- **Phase 2**: After `core-message.md` (before HITL-3b), after `sermon-outline.md` (before HITL-4)
+- **Phase 3**: After `sermon-draft.md`, after `review-report.md` (before HITL-5b), after `sermon-final.md`
+
+### P1 Translation Functions (deterministic — no AI judgment)
+```python
+# 1. Get files to translate for a given phase
+targets = _sermon_lib.get_translation_targets(phase, output_dir)
+# Returns: [{"source": "path/to/file.md", "target": "path/to/file.ko.md"}, ...]
+
+# 2. Build deterministic prompt for @sermon-translator
+prompt = _sermon_lib.build_translation_prompt(source_file, glossary_path, output_dir)
+
+# 3. Validate translation output (L0 structural checks)
+result = _sermon_lib.validate_translation_output(source_path, translation_path)
+# Checks: file exists, size ratio 0.6-2.5x, heading structure preserved, code blocks preserved
+
+# 4. Extract translation pACS (4-axis: Ft/Ct/Nt/Tt)
+pacs = _sermon_lib.extract_translation_pacs(content)
+# Returns: {"Ft": 95, "Ct": 90, "Nt": 85, "Tt": 90, "min_score": 85, "grade": "B+"}
+
+# 5. Deterministic retry decision
+decision = _sermon_lib.should_retranslate(pacs_result, retry_count, max_retries=2)
+# Returns: {"should_retry": bool, "reason": str}
+
+# 6. Collect discovered terms from all .ko.md files
+terms = _sermon_lib.collect_discovered_terms(translation_files)
+
+# 7. Merge new terms into glossary (Orchestrator-only, atomic)
+result = _sermon_lib.merge_glossary_terms(glossary_path, new_terms)
+```
+
+### Wave Translation Pattern (2-Function Master)
+
+Translation uses the P1 Master pattern to minimize AI judgment and prevent hallucination.
+The Orchestrator calls exactly 2 Python functions; the only AI task is dispatching Agent calls.
+
+```
+1. PREPARE (P1 — deterministic):
+   batch = prepare_translation_batch("wave-N", output_dir, glossary_path)
+   if batch["skip_reason"]:
+       log skip_reason → advance to next wave
+       return
+
+2. DISPATCH (AI — parallel Agent calls):
+   For each target in batch["targets"]:
+       Agent(subagent_type="translator", prompt=target["prompt"])
+
+3. FINALIZE (P1 — deterministic):
+   result = finalize_translation_batch("wave-N", output_dir, glossary_path, session_path)
+
+4. HANDLE RETRANSLATION (if needed):
+   if result["retranslate"]:
+       For each entry in result["retranslate"]:
+           Agent(subagent_type="translator", prompt=entry["prompt"])
+       # Re-run finalize after retranslation (max 2 retries total)
+
+5. BLOCKING GUARD — do NOT advance to next wave until:
+   pending = check_pending_translation("wave-N", output_dir)
+   assert pending["pending"] == False
+```
+
+**MANDATORY — NEVER SKIP**: This pattern executes after every Gate pass.
+The 8 internal P1 functions (validate, pACS, retry, terms, glossary, state)
+are called automatically inside prepare/finalize — the Orchestrator does not
+call them individually.
+
+### Glossary SOT Rule
+- **Reader**: `@sermon-translator` (read-only, reports `## Discovered Terms` in output)
+- **Writer**: Orchestrator only (calls `merge_glossary_terms()` atomically)
+- **File**: `translations/theological-glossary.yaml`
+
 ## Gate Enforcement
 
 Before advancing past a wave boundary, ALWAYS check:
@@ -199,13 +284,21 @@ The `/sermon-status` command also reports pending gates.
 When context resets mid-workflow:
 1. Framework's `restore_context.py` provides session pointer (automatic)
 2. User invokes `/sermon-resume`
-3. Read session.json, todo-checklist.md, research-synthesis.md
-4. Determine last completed step from checklist
-5. Resume from next step
+3. Read session.json (includes `translation_state`), todo-checklist.md, research-synthesis.md
+4. Verify and recover translations (P1 Master Pattern):
+   - For each applicable phase: `pending = check_pending_translation(phase, output_dir)`
+   - If `pending["pending"]`: run `prepare_translation_batch()` → dispatch Agents → `finalize_translation_batch()`
+   - Check `failed_translations` for unresolved issues
+5. Determine last completed step from checklist
+6. Resume from next step
 
 ## References
 - `prompt/workflow.md` — Full workflow definition
 - `.claude/agents/references/gra-compliance.md` — GRA protocol
+- `.claude/agents/sermon-translator.md` — Theological translation sub-agent
+- `translations/theological-glossary.yaml` — Translation glossary (SOT: Orchestrator-only writes)
 - `.claude/hooks/scripts/_sermon_lib.py` — Deterministic functions
   - Note: `workflow.md` references `checklist_manager.py` (§996); this maps to `_sermon_lib.py` functions (`generate_checklist()`, `update_checklist()`, `check_pending_gate()`, etc.)
   - P1 functions (hallucination prevention): `build_research_agent_prompt()`, `validate_agent_output()`, `extract_claims_from_output()`, `resolve_dependency_files()`, `record_gate_completion()`
+  - P1 translation functions: `get_translation_targets()`, `build_translation_prompt()`, `validate_translation_output()`, `extract_translation_pacs()`, `should_retranslate()`, `collect_discovered_terms()`, `merge_glossary_terms()`, `update_translation_state()`
+  - P1 translation master functions (2-Function Pattern): `check_pending_translation()`, `prepare_translation_batch()`, `finalize_translation_batch()`

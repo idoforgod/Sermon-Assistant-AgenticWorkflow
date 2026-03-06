@@ -82,7 +82,7 @@ def main():
         "PA2": "pACS log is too small — include Pre-mortem 3 questions + all dimension scores + pACS = min(F,C,L)",
         "PA3": "Add dimension scores: F (Faithfulness), C (Completeness), L (Lucidity) each 0-100",
         "PA4": "Add Pre-mortem section before scores — answer 3 questions per AGENTS.md §5.4",
-        "T9": "Fix pACS arithmetic: pACS must equal min(F, C, L). Recalculate and correct",
+        "T9": "Fix pACS arithmetic: pACS must equal min(all dimension scores). Check pACS log for correct dimension names (F/C/L or Ft/Ct/Nt/Tt)",
         "PA7": f"pACS is RED (< 50) — rework required. Run: python3 .claude/hooks/scripts/validate_retry_budget.py --step {step} --gate pacs --project-dir . --check-and-increment",
         # L0 Anti-Skip Guard remediations (used when --check-l0 is active)
         "L0a": f"Step {step} output file missing — ensure SOT outputs.step-{step} points to an existing file",

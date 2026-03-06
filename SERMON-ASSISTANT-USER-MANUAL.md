@@ -91,7 +91,7 @@ Claude Code가 실행되면 `CLAUDE.md`를 자동으로 읽고, 시스템의 절
 시스템이 자동으로 수행:
 - `sermon-output/` 폴더 구조 생성
 - `session.json` 초기화 (Context File)
-- `todo-checklist.md` 생성 (120단계 체크리스트)
+- `todo-checklist.md` 생성 (155단계 체크리스트)
 - `state.yaml` 설교 워크플로우 필드 초기화
 - `user-resource/` 폴더 확인 (사용자 참고 자료)
 

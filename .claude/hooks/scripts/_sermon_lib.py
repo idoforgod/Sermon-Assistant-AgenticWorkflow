@@ -12,13 +12,15 @@ Functions grouped by domain:
   2. Hallucination Firewall (regex-based pattern blocking)
   3. SRCS Scoring (4-axis mathematical calculation)
   4. Cross-Validation Gate (structural validation only)
-  5. Checklist Management (130-step todo-checklist.md per workflow.md table)
+  5. Checklist Management (155-step todo-checklist.md per workflow.md table)
   6. Session Initialization (Phase 0 deterministic setup)
   7. Error Handling (agent-level 5 types + workflow-level 3 handlers)
   8-10. Wave boundary, utility, formatting
   11. Agent Dispatch (dependency resolution + prompt generation)
   12. Agent Output Validation (P1 claim extraction + unified pipeline)
   13. Gate Completion (safe SOT update with ordering enforcement)
+  14. Translation Management (P1 routing, prompt, validation, pACS, glossary)
+  15. Session Discovery & Context Resolution (P1 Masters for init/resume)
 
 Reference: prompt/workflow.md (Sermon Research Workflow v2.0)
 """
@@ -188,24 +190,59 @@ _FIREWALL_VERIFY = [
 # Input mode patterns (workflow.md:92-97)
 INPUT_MODES = {"theme", "passage", "series"}
 
-# Checklist template section counts (workflow.md:1084-1099 table)
-# Note: workflow.md titles this "120-step" but the table sums to 130.
-# Gates, SRCS Evaluation, and Research Synthesis are implicit within
-# the Wave/HITL step counts as documented in the source table.
+# Translation target files per phase/wave (P1 deterministic routing)
+# Key = phase/wave, Value = list of files to translate after that phase
+TRANSLATION_TARGETS: dict[str, list[str]] = {
+    "phase-0-a": ["passage-candidates.md"],
+    "phase-0-c": ["series-context.md"],
+    "wave-1": [
+        "01-original-text-analysis.md",
+        "02-translation-manuscript-comparison.md",
+        "10-biblical-geography.md",
+        "11-historical-cultural-background.md",
+    ],
+    "wave-2": [
+        "03-structural-analysis.md",
+        "04-parallel-passage-analysis.md",
+        "09-keyword-study.md",
+    ],
+    "wave-3": [
+        "05-theological-analysis.md",
+        "06-literary-analysis.md",
+        "08-historical-cultural-context.md",
+    ],
+    "wave-4": [
+        "07-rhetorical-analysis.md",
+        "confidence-report.md",
+        "research-synthesis.md",
+    ],
+    "phase-2-message": ["core-message.md"],
+    "phase-2-outline": ["sermon-outline.md"],
+    "phase-3-draft": ["sermon-draft.md"],
+    "phase-3-review": ["review-report.md"],
+    "phase-3-final": ["sermon-final.md"],
+}
+
+# Checklist template section counts (workflow.md:1084-1099 table, updated for translation)
+# Total: 155 steps (130 original + 25 translation steps)
 CHECKLIST_SECTIONS = [
     ("Phase 0: Initialization", 6),
-    ("Phase 0-A: Passage Search (Mode A)", 6),
+    ("Phase 0-A: Passage Search (Mode A)", 8),
     ("HITL-1: Passage Selection", 3),
     ("Wave 1: Independent Analysis", 16),
+    ("Wave 1 Translation", 4),
     ("Wave 2: Dependent Analysis", 12),
+    ("Wave 2 Translation", 3),
     ("Wave 3: Deep Analysis", 12),
+    ("Wave 3 Translation", 3),
     ("Wave 4: Integration Analysis", 6),
+    ("Wave 4 Translation", 3),
     ("HITL-2: Research Review", 8),
-    ("Phase 2: Planning", 16),
+    ("Phase 2: Planning", 20),
     ("HITL-3a/3b: Style & Message", 10),
     ("Phase 2.5: Style Analysis", 4),
     ("HITL-4: Outline Approval", 3),
-    ("Phase 3: Implementation", 18),
+    ("Phase 3: Implementation", 24),
     ("HITL-5a/5b: Format & Final", 10),
 ]
 
@@ -741,7 +778,7 @@ def validate_gate_result(
 # ===================================================================
 
 def generate_checklist() -> str:
-    """Generate the todo-checklist.md content (130 steps per workflow.md table).
+    """Generate the todo-checklist.md content (155 steps per workflow.md table).
 
     Reference: workflow.md:1078-1099
     """
@@ -886,7 +923,7 @@ def generate_session_json(
         mode = "theme"  # Safe default
 
     return {
-        "version": "2.0",
+        "version": "2.1",
         "created_at": datetime.now(timezone.utc).isoformat(),
         "mode": mode,
         "input": user_input,
@@ -895,6 +932,12 @@ def generate_session_json(
             "research_scope": "full",
         },
         "context_snapshots": {},
+        "translation_state": {
+            "completed_phases": [],
+            "glossary_terms_added": 0,
+            "glossary_updated_at": None,
+            "failed_translations": [],
+        },
         "status": "initialized",
     }
 
@@ -903,29 +946,150 @@ def get_output_dir_name(title: str) -> str:
     """Generate output directory name from sermon title.
 
     Format: sermon-output/[title-YYYY-MM-DD]/
+
+    Colons and slashes are converted to hyphens (e.g., "8:1-10" -> "8-1-10")
+    before stripping remaining special characters.
     """
-    safe_title = re.sub(r"[^\w\s가-힣-]", "", title).strip()
+    safe_title = re.sub(r"[:/]", "-", title)  # colons/slashes -> hyphens
+    safe_title = re.sub(r"[^\w\s가-힣-]", "", safe_title).strip()
     safe_title = re.sub(r"\s+", "-", safe_title)[:50]
     date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     return f"sermon-output/{safe_title}-{date_str}"
 
 
 def create_output_structure(base_dir: str) -> dict[str, str]:
-    """Create the output directory structure.
+    """Create the output directory structure with collision avoidance.
+
+    If base_dir already exists (e.g., same passage on same day),
+    appends a numeric suffix (-2, -3, ...) to avoid overwriting.
 
     Returns dict of created directory paths.
     Reference: workflow.md:706-730
+
+    P1 Compliance: Deterministic filesystem check only. No AI judgment.
     """
+    actual_dir = base_dir
+    if os.path.exists(base_dir):
+        counter = 2
+        while os.path.exists(f"{base_dir}-{counter}"):
+            counter += 1
+        actual_dir = f"{base_dir}-{counter}"
+
     dirs = {
-        "root": base_dir,
-        "research": os.path.join(base_dir, "research-package"),
-        "temp": os.path.join(base_dir, "_temp"),
+        "root": actual_dir,
+        "research": os.path.join(actual_dir, "research-package"),
+        "temp": os.path.join(actual_dir, "_temp"),
+        "pacs_logs": os.path.join(actual_dir, "pacs-logs"),
     }
 
     for d in dirs.values():
         os.makedirs(d, exist_ok=True)
 
     return dirs
+
+
+def initialize_sermon_output(
+    user_input: str,
+    mode: str,
+    options: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
+    """P1 Master: Phase 0 complete initialization.
+
+    Single call performs ALL Phase 0 setup:
+      1. get_output_dir_name(user_input) -> directory name
+      2. create_output_structure(base_dir) -> directories (with collision avoidance)
+      3. generate_session_json(mode, user_input, options) -> session.json write
+      4. generate_checklist() -> todo-checklist.md write
+
+    The Orchestrator calls this ONCE, then writes the returned
+    state_yaml_sermon dict to state.yaml. No other Phase 0 calls needed.
+
+    P1 Compliance: 100% deterministic. Zero AI judgment.
+    SOT Compliance: Writes session.json + checklist (domain files).
+                    Returns state_yaml_sermon for Orchestrator to write to state.yaml
+                    (preserving single-writer rule).
+
+    Args:
+        user_input: Raw user input (passage, theme, or series description)
+        mode: Detected input mode ("passage", "theme", or "series")
+        options: Optional overrides for analysis_level / research_scope
+
+    Returns:
+        {
+            "success": bool,
+            "output_dir": str,           # Final subdirectory path (collision-safe)
+            "session_path": str,         # session.json absolute path
+            "checklist_path": str,       # todo-checklist.md absolute path
+            "state_yaml_sermon": {       # Orchestrator writes this to state.yaml
+                "mode": str,
+                "output_dir": str,
+                "completed_gates": [],
+                "srcs_threshold": 70,
+            },
+            "dirs": dict,               # All created directory paths
+            "error": str | None,
+        }
+    """
+    result: dict[str, Any] = {
+        "success": False,
+        "output_dir": "",
+        "session_path": "",
+        "checklist_path": "",
+        "state_yaml_sermon": {},
+        "dirs": {},
+        "error": None,
+    }
+
+    # Step 1: Generate directory name from user input
+    base_dir = get_output_dir_name(user_input)
+
+    # Step 2: Create directory structure (with collision avoidance)
+    try:
+        dirs = create_output_structure(base_dir)
+    except OSError as e:
+        result["error"] = f"Cannot create output directory: {e}"
+        return result
+
+    actual_dir = dirs["root"]
+    result["output_dir"] = actual_dir
+    result["dirs"] = dirs
+
+    # Step 3: Generate and write session.json
+    session_data = generate_session_json(mode, user_input, options)
+    session_path = os.path.join(actual_dir, "session.json")
+    try:
+        tmp = session_path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(session_data, f, indent=2, ensure_ascii=False)
+        os.replace(tmp, session_path)
+    except OSError as e:
+        result["error"] = f"Cannot write session.json: {e}"
+        return result
+    result["session_path"] = session_path
+
+    # Step 4: Generate and write todo-checklist.md
+    checklist_content = generate_checklist()
+    checklist_path = os.path.join(actual_dir, "todo-checklist.md")
+    try:
+        tmp = checklist_path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(checklist_content)
+        os.replace(tmp, checklist_path)
+    except OSError as e:
+        result["error"] = f"Cannot write checklist: {e}"
+        return result
+    result["checklist_path"] = checklist_path
+
+    # Step 5: Build state.yaml sermon section values
+    result["state_yaml_sermon"] = {
+        "mode": mode if mode in INPUT_MODES else "theme",
+        "output_dir": actual_dir,
+        "completed_gates": [],
+        "srcs_threshold": 70,
+    }
+
+    result["success"] = True
+    return result
 
 
 def detect_input_mode(user_input: str) -> str:
@@ -1158,13 +1322,13 @@ def get_current_wave(step: int) -> Optional[str]:
     for section_name, count in CHECKLIST_SECTIONS:
         end = current + count - 1
         if current <= step <= end:
-            if "Wave 1" in section_name:
+            if section_name.startswith("Wave 1"):
                 return "wave-1"
-            elif "Wave 2" in section_name:
+            elif section_name.startswith("Wave 2"):
                 return "wave-2"
-            elif "Wave 3" in section_name:
+            elif section_name.startswith("Wave 3"):
                 return "wave-3"
-            elif "Wave 4" in section_name:
+            elif section_name.startswith("Wave 4"):
                 return "wave-4"
             else:
                 return section_name
@@ -1179,15 +1343,16 @@ def check_pending_gate(current_step: int, completed_gates: list[str]) -> Optiona
     Gates fire at wave boundaries (end of Wave 1/2/3 sections).
     """
     # Compute wave end steps from CHECKLIST_SECTIONS
+    # Match only analysis sections, not translation sections
     step = 1
     wave_end_steps: dict[str, int] = {}
     for section_name, count in CHECKLIST_SECTIONS:
         end = step + count - 1
-        if "Wave 1" in section_name:
+        if section_name.startswith("Wave 1:"):
             wave_end_steps["gate-1"] = end
-        elif "Wave 2" in section_name:
+        elif section_name.startswith("Wave 2:"):
             wave_end_steps["gate-2"] = end
-        elif "Wave 3" in section_name:
+        elif section_name.startswith("Wave 3:"):
             wave_end_steps["gate-3"] = end
         step = end + 1
 
@@ -1602,3 +1767,1218 @@ def record_gate_completion(
         "sermon_state": updated,
         "error": None,
     }
+
+
+# ===================================================================
+# 14. TRANSLATION MANAGEMENT — P1 Deterministic Pipeline
+# ===================================================================
+
+# Translation pACS thresholds
+_TRANSLATION_PACS_GREEN = 70
+_TRANSLATION_PACS_YELLOW = 50
+
+# Regex patterns for pACS score extraction from translator output
+_PACS_SCORE_PATTERN = re.compile(
+    r"\|\s*(?:Ft|Ct|Nt|Tt)\s*\([^)]*\)\s*\|\s*(\d{1,3})\s*\|",
+)
+_PACS_DIMENSION_PATTERN = re.compile(
+    r"\|\s*(Ft|Ct|Nt|Tt)\s*\([^)]*\)\s*\|\s*(\d{1,3})\s*\|",
+)
+
+# Heading pattern for structural comparison
+_HEADING_PATTERN = re.compile(r"^(#{1,6})\s+", re.MULTILINE)
+
+# Code block pattern for preservation check
+_CODE_BLOCK_PATTERN = re.compile(r"^```\w*\s*$", re.MULTILINE)
+
+# Discovered Terms section pattern
+_DISCOVERED_TERMS_PATTERN = re.compile(
+    r"^## Discovered Terms\s*\n(.*)",
+    re.MULTILINE | re.DOTALL,
+)
+_DISCOVERED_TERM_ENTRY = re.compile(
+    r'-\s+english:\s*"([^"]+)"\s*\n\s+korean:\s*"([^"]+)"',
+)
+
+
+def get_translation_targets(
+    phase: str,
+    output_dir: str,
+) -> list[dict[str, str]]:
+    """Return translation target files for a given phase/wave.
+
+    P1 Compliance: Deterministic routing — no AI judgment about
+    which files to translate. Fixed mapping from TRANSLATION_TARGETS.
+
+    Args:
+        phase: Key from TRANSLATION_TARGETS (e.g., "wave-1", "phase-2-message")
+        output_dir: Base output directory (e.g., "sermon-output/trust-2026-03-06")
+
+    Returns:
+        List of {"source": str, "target": str} with absolute paths.
+        Empty list if phase is not in TRANSLATION_TARGETS.
+    """
+    files = TRANSLATION_TARGETS.get(phase, [])
+    result: list[dict[str, str]] = []
+
+    # Files that live in research-package/ but are not in AGENT_OUTPUT_FILES
+    _extra_research_files = {"confidence-report.md", "srcs-summary.json"}
+
+    for filename in files:
+        # Determine subdirectory: research files go in research-package/
+        in_research = (
+            filename in AGENT_OUTPUT_FILES.values()
+            or filename in _extra_research_files
+        )
+        if in_research:
+            source = os.path.join(output_dir, "research-package", filename)
+        else:
+            source = os.path.join(output_dir, filename)
+
+        # .ko.md naming: insert .ko before .md
+        base, ext = os.path.splitext(filename)
+        ko_filename = f"{base}.ko{ext}"
+
+        if in_research:
+            target = os.path.join(output_dir, "research-package", ko_filename)
+        else:
+            target = os.path.join(output_dir, ko_filename)
+
+        result.append({"source": source, "target": target})
+
+    return result
+
+
+def build_translation_prompt(
+    source_file: str,
+    glossary_path: str,
+    output_dir: str,
+) -> str:
+    """Generate deterministic runtime prompt for @sermon-translator.
+
+    Parallels build_research_agent_prompt() for research agents.
+    The agent's static instructions are loaded from
+    .claude/agents/sermon-translator.md via Claude Code's subagent_type.
+    This function generates only runtime parameters.
+
+    P1 Compliance: Orchestrator MUST use this function instead of
+    manually constructing translation prompts.
+
+    Args:
+        source_file: Absolute path to English source .md file
+        glossary_path: Path to theological-glossary.yaml
+        output_dir: Base output directory for pACS log
+
+    Returns:
+        Formatted prompt string for Task(subagent_type="sermon-translator")
+    """
+    # Determine output path (.ko.md)
+    source_dir = os.path.dirname(source_file)
+    source_name = os.path.basename(source_file)
+    base, ext = os.path.splitext(source_name)
+    ko_filename = f"{base}.ko{ext}"
+    target_file = os.path.join(source_dir, ko_filename)
+
+    # pACS log path
+    pacs_log = os.path.join(output_dir, "pacs-logs",
+                            f"translation-pacs-{base}.md")
+
+    lines = [
+        "## Runtime Parameters",
+        "",
+        f"Source File: `{source_file}`",
+        f"Output File: `{target_file}`",
+        f"Glossary: `{glossary_path}`",
+        f"pACS Log: `{pacs_log}`",
+        "",
+        "## Instructions",
+        "1. Read the glossary file first.",
+        "2. Read the source file completely.",
+        "3. Translate following your protocol (Steps 1-7).",
+        "4. Write the translation to the Output File path above.",
+        "5. Write the pACS log to the pACS Log path above.",
+    ]
+
+    return "\n".join(lines)
+
+
+def validate_translation_output(
+    source_path: str,
+    translation_path: str,
+) -> dict[str, Any]:
+    """Structural validation of translation against English source.
+
+    P1 Compliance: Deterministic structural comparison using regex
+    and string operations. No AI judgment — only mathematical checks.
+
+    Validates:
+    - L0: File existence and minimum size
+    - Heading count match (h1-h6 between source and translation)
+    - Code block preservation (code blocks not translated)
+    - Size ratio within acceptable range (0.3-2.5)
+
+    Args:
+        source_path: Path to English original .md file
+        translation_path: Path to Korean translation .ko.md file
+
+    Returns:
+        {
+            "valid": bool,
+            "source": str,
+            "translation": str,
+            "l0": {"exists": bool, "size_ok": bool, "size": int},
+            "structure": {
+                "heading_match": bool,
+                "source_headings": int,
+                "translation_headings": int,
+                "code_blocks_preserved": bool,
+                "source_code_blocks": int,
+                "translation_code_blocks": int,
+            },
+            "size_ratio": float,
+            "errors": list[str],
+        }
+    """
+    result: dict[str, Any] = {
+        "valid": True,
+        "source": source_path,
+        "translation": translation_path,
+        "l0": {"exists": False, "size_ok": False, "size": 0},
+        "structure": {
+            "heading_match": True,
+            "source_headings": 0,
+            "translation_headings": 0,
+            "code_blocks_preserved": True,
+            "source_code_blocks": 0,
+            "translation_code_blocks": 0,
+        },
+        "size_ratio": 0.0,
+        "errors": [],
+    }
+
+    # --- L0: File existence and size ---
+    if not os.path.isfile(translation_path):
+        result["valid"] = False
+        result["errors"].append(
+            f"Translation file not found: {translation_path}")
+        return result
+
+    result["l0"]["exists"] = True
+    size = os.path.getsize(translation_path)
+    result["l0"]["size"] = size
+
+    if size < 100:
+        result["valid"] = False
+        result["l0"]["size_ok"] = False
+        result["errors"].append(
+            f"Translation file too small: {size} bytes (min 100)")
+        return result
+
+    result["l0"]["size_ok"] = True
+
+    # --- Read both files ---
+    try:
+        with open(source_path, "r", encoding="utf-8") as f:
+            source_content = f.read()
+        with open(translation_path, "r", encoding="utf-8") as f:
+            translation_content = f.read()
+    except OSError as e:
+        result["valid"] = False
+        result["errors"].append(f"Cannot read file: {e}")
+        return result
+
+    # --- Heading count comparison ---
+    source_headings = _HEADING_PATTERN.findall(source_content)
+    # Exclude headings from Discovered Terms section in translation
+    trans_main = _DISCOVERED_TERMS_PATTERN.split(translation_content)[0]
+    translation_headings = _HEADING_PATTERN.findall(trans_main)
+
+    result["structure"]["source_headings"] = len(source_headings)
+    result["structure"]["translation_headings"] = len(translation_headings)
+
+    if len(source_headings) != len(translation_headings):
+        result["structure"]["heading_match"] = False
+        result["errors"].append(
+            f"Heading count mismatch: source={len(source_headings)}, "
+            f"translation={len(translation_headings)}"
+        )
+        # Heading mismatch is a warning, not a failure
+        # (translator may split/merge minor headings)
+
+    # --- Code block preservation ---
+    source_blocks = _CODE_BLOCK_PATTERN.findall(source_content)
+    translation_blocks = _CODE_BLOCK_PATTERN.findall(trans_main)
+
+    result["structure"]["source_code_blocks"] = len(source_blocks)
+    result["structure"]["translation_code_blocks"] = len(translation_blocks)
+
+    if len(source_blocks) != len(translation_blocks):
+        result["structure"]["code_blocks_preserved"] = False
+        result["errors"].append(
+            f"Code block count mismatch: source={len(source_blocks)}, "
+            f"translation={len(translation_blocks)}"
+        )
+
+    # --- Size ratio ---
+    source_size = len(source_content.encode("utf-8"))
+    trans_size = len(translation_content.encode("utf-8"))
+
+    if source_size > 0:
+        ratio = trans_size / source_size
+        result["size_ratio"] = round(ratio, 2)
+
+        if ratio < 0.3 or ratio > 2.5:
+            result["valid"] = False
+            result["errors"].append(
+                f"Size ratio out of range: {ratio:.2f} "
+                f"(expected 0.3-2.5, source={source_size}B, "
+                f"translation={trans_size}B)"
+            )
+
+    return result
+
+
+def extract_translation_pacs(
+    content: str,
+) -> dict[str, Any]:
+    """Extract pACS scores from @sermon-translator output.
+
+    P1 Compliance: Regex-based score extraction + mathematical min()
+    calculation. No AI judgment in grade determination.
+
+    Parses the markdown table format:
+    | Ft (Fidelity) | 85 | ... |
+    | Ct (Completeness) | 90 | ... |
+    | Nt (Naturalness) | 80 | ... |
+    | Tt (Theological Accuracy) | 88 | ... |
+
+    Args:
+        content: Full text content of the translation output or pACS log
+
+    Returns:
+        {
+            "success": bool,
+            "scores": {"Ft": int, "Ct": int, "Nt": int, "Tt": int},
+            "pacs": int,
+            "grade": str,  # "GREEN" | "YELLOW" | "RED"
+            "weak_dimension": str,  # lowest scoring dimension
+            "error": str | None,
+        }
+    """
+    result: dict[str, Any] = {
+        "success": False,
+        "scores": {"Ft": 0, "Ct": 0, "Nt": 0, "Tt": 0},
+        "pacs": 0,
+        "grade": "RED",
+        "weak_dimension": "",
+        "error": None,
+    }
+
+    matches = _PACS_DIMENSION_PATTERN.findall(content)
+    if not matches:
+        result["error"] = "No pACS scores found in content"
+        return result
+
+    found_dims: dict[str, int] = {}
+    for dim, score_str in matches:
+        try:
+            score = int(score_str)
+            if 0 <= score <= 100:
+                found_dims[dim] = score
+        except ValueError:
+            continue
+
+    required_min = {"Ft", "Ct", "Nt"}
+    missing_min = required_min - set(found_dims.keys())
+    if missing_min:
+        result["error"] = f"Missing pACS dimensions: {sorted(missing_min)}"
+        return result
+
+    result["scores"] = {
+        "Ft": found_dims["Ft"],
+        "Ct": found_dims["Ct"],
+        "Nt": found_dims["Nt"],
+        "Tt": found_dims.get("Tt", 0),
+    }
+
+    pacs = min(found_dims.values())
+    result["pacs"] = pacs
+
+    # Find weakest dimension
+    weak_dim = min(found_dims, key=found_dims.get)  # type: ignore[arg-type]
+    result["weak_dimension"] = weak_dim
+
+    # Grade determination (deterministic thresholds)
+    if pacs >= _TRANSLATION_PACS_GREEN:
+        result["grade"] = "GREEN"
+    elif pacs >= _TRANSLATION_PACS_YELLOW:
+        result["grade"] = "YELLOW"
+    else:
+        result["grade"] = "RED"
+
+    result["success"] = True
+    return result
+
+
+def should_retranslate(
+    pacs_result: dict[str, Any],
+    retry_count: int,
+    max_retries: int = 2,
+) -> dict[str, Any]:
+    """Determine if retranslation is needed based on pACS score.
+
+    P1 Compliance: Numeric comparison only. No subjective judgment.
+
+    Args:
+        pacs_result: Output from extract_translation_pacs()
+        retry_count: How many times this file has been retranslated
+        max_retries: Maximum retranslation attempts (default 2)
+
+    Returns:
+        {
+            "retranslate": bool,
+            "reason": str,
+            "retry_count": int,
+            "max_retries": int,
+        }
+    """
+    if not pacs_result.get("success"):
+        return {
+            "retranslate": True,
+            "reason": f"pACS extraction failed: {pacs_result.get('error')}",
+            "retry_count": retry_count,
+            "max_retries": max_retries,
+        }
+
+    grade = pacs_result.get("grade", "RED")
+
+    if grade == "GREEN":
+        return {
+            "retranslate": False,
+            "reason": f"pACS GREEN ({pacs_result['pacs']})",
+            "retry_count": retry_count,
+            "max_retries": max_retries,
+        }
+
+    if grade == "YELLOW":
+        return {
+            "retranslate": False,
+            "reason": (
+                f"pACS YELLOW ({pacs_result['pacs']}), "
+                f"weak: {pacs_result['weak_dimension']} — accepted with flag"
+            ),
+            "retry_count": retry_count,
+            "max_retries": max_retries,
+        }
+
+    # RED
+    if retry_count >= max_retries:
+        return {
+            "retranslate": False,
+            "reason": (
+                f"pACS RED ({pacs_result['pacs']}) but max retries "
+                f"({max_retries}) exhausted — accepting with warning"
+            ),
+            "retry_count": retry_count,
+            "max_retries": max_retries,
+        }
+
+    return {
+        "retranslate": True,
+        "reason": (
+            f"pACS RED ({pacs_result['pacs']}), "
+            f"weak: {pacs_result['weak_dimension']} — "
+            f"retry {retry_count + 1}/{max_retries}"
+        ),
+        "retry_count": retry_count,
+        "max_retries": max_retries,
+    }
+
+
+def collect_discovered_terms(
+    translation_files: list[str],
+) -> list[dict[str, str]]:
+    """Aggregate Discovered Terms from multiple translation outputs.
+
+    P1 Compliance: Pure regex parsing + deduplication. No AI judgment.
+
+    Parses ## Discovered Terms YAML sections from .ko.md files.
+    Deduplicates by English key (keeps first occurrence).
+
+    Args:
+        translation_files: List of .ko.md file paths
+
+    Returns:
+        List of {"english": str, "korean": str}. Empty if no new terms.
+    """
+    seen: set[str] = set()
+    terms: list[dict[str, str]] = []
+
+    for filepath in translation_files:
+        try:
+            with open(filepath, "r", encoding="utf-8") as f:
+                content = f.read()
+        except OSError:
+            continue
+
+        section_match = _DISCOVERED_TERMS_PATTERN.search(content)
+        if not section_match:
+            continue
+
+        section_text = section_match.group(1)
+
+        # Skip "No new terms discovered" entries
+        if "no new terms" in section_text.lower():
+            continue
+
+        for entry_match in _DISCOVERED_TERM_ENTRY.finditer(section_text):
+            english = entry_match.group(1).strip()
+            korean = entry_match.group(2).strip()
+
+            if english and korean and english.lower() not in seen:
+                seen.add(english.lower())
+                terms.append({"english": english, "korean": korean})
+
+    return terms
+
+
+def merge_glossary_terms(
+    glossary_path: str,
+    new_terms: list[dict[str, str]],
+) -> dict[str, Any]:
+    """Safely merge new terms into theological glossary (atomic write).
+
+    P1 Compliance: YAML parsing + deduplication + sorted insertion.
+    Uses atomic write (tmp + os.replace) to prevent corruption.
+
+    SOT Compliance: Only Orchestrator should call this function.
+    @sermon-translator instances are read-only on the glossary.
+
+    Args:
+        glossary_path: Path to theological-glossary.yaml
+        new_terms: List of {"english": str, "korean": str} to add
+
+    Returns:
+        {
+            "success": bool,
+            "added": int,
+            "skipped_duplicates": int,
+            "total_entries": int,
+            "error": str | None,
+        }
+    """
+    result: dict[str, Any] = {
+        "success": False,
+        "added": 0,
+        "skipped_duplicates": 0,
+        "total_entries": 0,
+        "error": None,
+    }
+
+    if not new_terms:
+        result["success"] = True
+        return result
+
+    # Read existing glossary
+    existing: dict[str, str] = {}
+    comments: list[str] = []
+
+    if os.path.isfile(glossary_path):
+        try:
+            with open(glossary_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    stripped = line.rstrip("\n")
+                    if stripped.startswith("#") or not stripped.strip():
+                        comments.append(stripped)
+                    else:
+                        # Parse "key": "value" format
+                        kv_match = re.match(
+                            r'^"([^"]+)":\s*"([^"]*)"', stripped)
+                        if kv_match:
+                            existing[kv_match.group(1)] = kv_match.group(2)
+        except OSError as e:
+            result["error"] = f"Cannot read glossary: {e}"
+            return result
+
+    # Merge new terms
+    added = 0
+    skipped = 0
+
+    for term in new_terms:
+        english = term["english"]
+        korean = term["korean"]
+        if english in existing:
+            skipped += 1
+        else:
+            existing[english] = korean
+            added += 1
+
+    result["added"] = added
+    result["skipped_duplicates"] = skipped
+    result["total_entries"] = len(existing)
+
+    if added == 0:
+        result["success"] = True
+        return result
+
+    # Write updated glossary (atomic)
+    sorted_entries = sorted(existing.items(), key=lambda x: x[0].lower())
+
+    lines = comments[:]
+    if lines and lines[-1].strip():
+        lines.append("")  # Blank line after comments
+
+    # Add new terms marker
+    lines.append(f"# === Auto-merged: {added} new terms "
+                 f"({datetime.now(timezone.utc).strftime('%Y-%m-%d')}) ===")
+
+    for eng, kor in sorted_entries:
+        lines.append(f'"{eng}": "{kor}"')
+
+    try:
+        tmp = glossary_path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write("\n".join(lines) + "\n")
+        os.replace(tmp, glossary_path)
+        result["success"] = True
+    except OSError as e:
+        result["error"] = f"Cannot write glossary: {e}"
+
+    return result
+
+
+def update_translation_state(
+    session_path: str,
+    phase: str,
+    glossary_terms_added: int = 0,
+    failed_file: Optional[str] = None,
+) -> dict[str, Any]:
+    """Update translation_state in session.json after a translation batch.
+
+    P1 Compliance: Deterministic JSON read-modify-write. No AI judgment.
+    SOT Compliance: Only Orchestrator calls this function.
+
+    Args:
+        session_path: Path to session.json
+        phase: Phase key from TRANSLATION_TARGETS (e.g., "wave-1", "phase-2-message")
+        glossary_terms_added: Number of new terms merged in this batch
+        failed_file: If a translation failed after max retries, record filename
+
+    Returns:
+        {"success": bool, "error": str | None}
+    """
+    result: dict[str, Any] = {"success": False, "error": None}
+
+    try:
+        with open(session_path, "r", encoding="utf-8") as f:
+            session = json.load(f)
+    except (OSError, json.JSONDecodeError) as e:
+        result["error"] = f"Cannot read session.json: {e}"
+        return result
+
+    # Ensure translation_state exists (backward compatibility with v2.0)
+    if "translation_state" not in session:
+        session["translation_state"] = {
+            "completed_phases": [],
+            "glossary_terms_added": 0,
+            "glossary_updated_at": None,
+            "failed_translations": [],
+        }
+
+    ts = session["translation_state"]
+
+    # Record completed phase (idempotent — no duplicates)
+    if phase not in ts["completed_phases"]:
+        ts["completed_phases"].append(phase)
+
+    # Update glossary stats
+    if glossary_terms_added > 0:
+        ts["glossary_terms_added"] = ts.get("glossary_terms_added", 0) + glossary_terms_added
+        ts["glossary_updated_at"] = datetime.now(timezone.utc).isoformat()
+
+    # Record failure (if any)
+    if failed_file:
+        ts.setdefault("failed_translations", []).append({
+            "phase": phase,
+            "file": failed_file,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
+
+    # Atomic write
+    try:
+        tmp = session_path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(session, f, indent=2, ensure_ascii=False)
+        os.replace(tmp, session_path)
+        result["success"] = True
+    except OSError as e:
+        result["error"] = f"Cannot write session.json: {e}"
+
+    return result
+
+
+# ===================================================================
+# 13. TRANSLATION ORCHESTRATION — P1 Master Functions
+# ===================================================================
+
+
+def check_pending_translation(
+    phase: str,
+    output_dir: str,
+) -> dict[str, Any]:
+    """Check if translation is complete for a given phase.
+
+    Reuses get_translation_targets() — no duplicated file mapping.
+    P1 Compliance: Deterministic filesystem check only.
+
+    Args:
+        phase: Key from TRANSLATION_TARGETS (e.g., "wave-1")
+        output_dir: Base output directory
+
+    Returns:
+        {
+            "pending": bool,        # True if any .ko.md missing
+            "phase": str,
+            "total": int,
+            "missing_files": [str], # Missing .ko.md paths
+            "existing_files": [str],
+        }
+    """
+    targets = get_translation_targets(phase, output_dir)
+    missing: list[str] = []
+    existing: list[str] = []
+
+    for t in targets:
+        if os.path.isfile(t["target"]):
+            existing.append(t["target"])
+        else:
+            missing.append(t["target"])
+
+    return {
+        "pending": len(missing) > 0,
+        "phase": phase,
+        "total": len(targets),
+        "missing_files": missing,
+        "existing_files": existing,
+    }
+
+
+def prepare_translation_batch(
+    phase: str,
+    output_dir: str,
+    glossary_path: str,
+) -> dict[str, Any]:
+    """P1 Master: Generate all inputs for a translation batch.
+
+    Deterministically produces prompts and paths for every file
+    in the given phase. The Orchestrator's only job is to dispatch
+    Agent calls with the provided prompts.
+
+    Internally calls:
+      - check_pending_translation(phase, output_dir)
+      - get_translation_targets(phase, output_dir)
+      - build_translation_prompt(source, glossary, output_dir) × N
+
+    P1 Compliance: Pure function composition — no AI judgment.
+    SOT Compliance: Read-only — no file writes.
+
+    Args:
+        phase: Key from TRANSLATION_TARGETS (e.g., "wave-1")
+        output_dir: Base output directory
+        glossary_path: Path to theological-glossary.yaml
+
+    Returns:
+        {
+            "phase": str,
+            "total": int,
+            "targets": [
+                {
+                    "source": str,       # English original path
+                    "target": str,       # .ko.md output path
+                    "prompt": str,       # @sermon-translator prompt
+                    "pacs_log": str,     # pACS log path
+                },
+                ...
+            ],
+            "glossary_path": str,
+            "skip_reason": str | None,   # Non-None if already complete
+        }
+    """
+    result: dict[str, Any] = {
+        "phase": phase,
+        "total": 0,
+        "targets": [],
+        "glossary_path": glossary_path,
+        "skip_reason": None,
+    }
+
+    # Check if phase exists in TRANSLATION_TARGETS
+    if phase not in TRANSLATION_TARGETS:
+        result["skip_reason"] = f"Unknown phase: {phase}"
+        return result
+
+    # Check if already complete
+    pending = check_pending_translation(phase, output_dir)
+    if not pending["pending"]:
+        result["total"] = pending["total"]
+        result["skip_reason"] = (
+            f"All {pending['total']} translations already complete "
+            f"for {phase}"
+        )
+        return result
+
+    # Generate targets with prompts
+    targets = get_translation_targets(phase, output_dir)
+    result["total"] = len(targets)
+
+    for t in targets:
+        source = t["source"]
+        target = t["target"]
+
+        # Skip if .ko.md already exists (partial completion)
+        if os.path.isfile(target):
+            continue
+
+        # Skip if English source doesn't exist
+        if not os.path.isfile(source):
+            continue
+
+        prompt = build_translation_prompt(source, glossary_path, output_dir)
+
+        # Derive pACS log path
+        base = os.path.splitext(os.path.basename(source))[0]
+        pacs_log = os.path.join(
+            output_dir, "pacs-logs", f"translation-pacs-{base}.md"
+        )
+
+        result["targets"].append({
+            "source": source,
+            "target": target,
+            "prompt": prompt,
+            "pacs_log": pacs_log,
+        })
+
+    return result
+
+
+def finalize_translation_batch(
+    phase: str,
+    output_dir: str,
+    glossary_path: str,
+    session_path: str,
+) -> dict[str, Any]:
+    """P1 Master: Validate, score, merge, and update after translation batch.
+
+    Performs ALL post-translation steps deterministically:
+      1. validate_translation_output() × N — structural checks
+      2. extract_translation_pacs() × N — score extraction
+      3. should_retranslate() × N — retry decisions
+      4. collect_discovered_terms() — aggregate new terms
+      5. merge_glossary_terms() — atomic glossary update
+      6. update_translation_state() — session.json update
+
+    The Orchestrator only needs to handle retranslate[] entries
+    (re-dispatch Agent calls for RED-graded files).
+
+    P1 Compliance: Pure deterministic pipeline — no AI judgment.
+    SOT Compliance: Writes to glossary (atomic) and session.json
+    only — Orchestrator sole writer.
+
+    Args:
+        phase: Key from TRANSLATION_TARGETS (e.g., "wave-1")
+        output_dir: Base output directory
+        glossary_path: Path to theological-glossary.yaml
+        session_path: Path to session.json
+
+    Returns:
+        {
+            "all_valid": bool,
+            "results": [
+                {
+                    "source": str,
+                    "target": str,
+                    "valid": bool,
+                    "pacs_grade": str,     # GREEN/YELLOW/RED
+                    "pacs_score": int,     # min(Ft,Ct,Nt,Tt)
+                    "errors": [str],
+                },
+                ...
+            ],
+            "retranslate": [
+                {
+                    "source": str,
+                    "target": str,
+                    "prompt": str,         # Re-translation prompt
+                    "reason": str,
+                },
+                ...
+            ],
+            "glossary_update": {
+                "terms_added": int,
+                "terms_skipped": int,
+            },
+            "state_updated": bool,
+            "error": str | None,
+        }
+    """
+    output: dict[str, Any] = {
+        "all_valid": True,
+        "results": [],
+        "retranslate": [],
+        "glossary_update": {"terms_added": 0, "terms_skipped": 0},
+        "state_updated": False,
+        "error": None,
+    }
+
+    targets = get_translation_targets(phase, output_dir)
+    ko_files: list[str] = []
+    failed_file: Optional[str] = None
+
+    for t in targets:
+        source = t["source"]
+        target = t["target"]
+        entry: dict[str, Any] = {
+            "source": source,
+            "target": target,
+            "valid": False,
+            "pacs_grade": "RED",
+            "pacs_score": 0,
+            "errors": [],
+        }
+
+        # Step 1: Structural validation
+        validation = validate_translation_output(source, target)
+        entry["valid"] = validation["valid"]
+        entry["errors"] = validation.get("errors", [])
+
+        if not validation["valid"]:
+            output["all_valid"] = False
+            failed_file = os.path.basename(target)
+
+            # Generate re-translation prompt
+            prompt = build_translation_prompt(
+                source, glossary_path, output_dir
+            )
+            output["retranslate"].append({
+                "source": source,
+                "target": target,
+                "prompt": prompt,
+                "reason": f"Validation failed: {'; '.join(entry['errors'])}",
+            })
+            output["results"].append(entry)
+            continue
+
+        # Step 2: Extract pACS (try .ko.md first, fallback to pACS log)
+        try:
+            with open(target, "r", encoding="utf-8") as f:
+                ko_content = f.read()
+        except OSError as e:
+            entry["errors"].append(f"Cannot read translation: {e}")
+            output["all_valid"] = False
+            output["results"].append(entry)
+            continue
+
+        pacs = extract_translation_pacs(ko_content)
+
+        # Fallback: read from separate pACS log file if .ko.md has no scores
+        if not pacs["success"]:
+            base = os.path.splitext(os.path.basename(source))[0]
+            pacs_log_path = os.path.join(
+                output_dir, "pacs-logs", f"translation-pacs-{base}.md"
+            )
+            if os.path.isfile(pacs_log_path):
+                try:
+                    with open(pacs_log_path, "r", encoding="utf-8") as f:
+                        pacs_log_content = f.read()
+                    pacs = extract_translation_pacs(pacs_log_content)
+                except OSError:
+                    pass
+
+        if pacs["success"]:
+            entry["pacs_grade"] = pacs["grade"]
+            entry["pacs_score"] = pacs["pacs"]
+        else:
+            entry["pacs_grade"] = "UNKNOWN"
+            entry["pacs_score"] = 0
+            entry["errors"].append(
+                f"pACS extraction failed: {pacs.get('error')}"
+            )
+
+        # Step 3: Retry decision
+        decision = should_retranslate(pacs, retry_count=0)
+        if decision["retranslate"]:
+            output["all_valid"] = False
+            prompt = build_translation_prompt(
+                source, glossary_path, output_dir
+            )
+            output["retranslate"].append({
+                "source": source,
+                "target": target,
+                "prompt": prompt,
+                "reason": decision["reason"],
+            })
+        else:
+            ko_files.append(target)
+
+        output["results"].append(entry)
+
+    # Step 4: Collect discovered terms from valid translations
+    terms: list[dict[str, str]] = []
+    if ko_files:
+        terms = collect_discovered_terms(ko_files)
+
+    # Step 5: Merge glossary terms (atomic, Orchestrator sole writer)
+    if terms:
+        merge_result = merge_glossary_terms(glossary_path, terms)
+        output["glossary_update"]["terms_added"] = merge_result.get(
+            "added", 0
+        )
+        output["glossary_update"]["terms_skipped"] = merge_result.get(
+            "skipped_duplicates", 0
+        )
+
+    # Step 6: Update translation state in session.json
+    glossary_added = output["glossary_update"]["terms_added"]
+    state_result = update_translation_state(
+        session_path,
+        phase,
+        glossary_terms_added=glossary_added,
+        failed_file=failed_file,
+    )
+    output["state_updated"] = state_result.get("success", False)
+    if not state_result.get("success"):
+        output["error"] = state_result.get("error")
+
+    return output
+
+
+# ===================================================================
+# 15. SESSION DISCOVERY & CONTEXT RESOLUTION — P1 Master Functions
+# ===================================================================
+
+
+def find_active_session(base_dir: str = "sermon-output") -> dict[str, Any]:
+    """Fallback: scan sermon-output/*/session.json when state.yaml is unavailable.
+
+    Scans all subdirectories of base_dir for session.json files.
+    Prefers non-completed sessions; among those, returns most recently created.
+    If all completed, returns most recently created completed session.
+
+    P1 Compliance: 100% deterministic. Filesystem + JSON parsing only.
+    SOT Compliance: Read-only. Modifies nothing.
+
+    Args:
+        base_dir: Parent directory to scan (default: "sermon-output")
+
+    Returns:
+        {
+            "found": bool,
+            "session_dir": str,      # e.g., "sermon-output/Romans-8-1-10-2026-03-06"
+            "session_path": str,     # e.g., "sermon-output/.../session.json"
+            "status": str,           # "initialized"|"running"|"completed"|"unknown"
+            "created_at": str,       # ISO timestamp from session.json
+        }
+    """
+    result: dict[str, Any] = {
+        "found": False,
+        "session_dir": "",
+        "session_path": "",
+        "status": "",
+        "created_at": "",
+    }
+
+    if not os.path.isdir(base_dir):
+        return result
+
+    candidates: list[dict[str, str]] = []
+    try:
+        entries = list(os.scandir(base_dir))
+    except OSError:
+        return result
+
+    for entry in entries:
+        if not entry.is_dir():
+            continue
+        sp = os.path.join(entry.path, "session.json")
+        if not os.path.isfile(sp):
+            continue
+        try:
+            with open(sp, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            candidates.append({
+                "session_dir": entry.path,
+                "session_path": sp,
+                "status": data.get("status", "unknown"),
+                "created_at": data.get("created_at", ""),
+            })
+        except (OSError, json.JSONDecodeError):
+            continue
+
+    if not candidates:
+        return result
+
+    # Prefer non-completed sessions; among those, most recently created
+    active = [c for c in candidates if c["status"] != "completed"]
+    chosen = max(active or candidates, key=lambda c: c["created_at"])
+
+    result["found"] = True
+    result["session_dir"] = chosen["session_dir"]
+    result["session_path"] = chosen["session_path"]
+    result["status"] = chosen["status"]
+    result["created_at"] = chosen["created_at"]
+    return result
+
+
+def _build_sermon_path_map(output_dir: str) -> dict[str, str]:
+    """Build deterministic path map for all sermon artifacts.
+
+    Internal helper for resolve_sermon_context().
+    P1 Compliance: Pure string operations. No filesystem access.
+
+    Args:
+        output_dir: Base output directory (e.g., "sermon-output/Romans-8-1-10-2026-03-06")
+
+    Returns:
+        Dict mapping artifact names to absolute paths.
+    """
+    rp = os.path.join(output_dir, "research-package")
+    return {
+        "session_json": os.path.join(output_dir, "session.json"),
+        "checklist": os.path.join(output_dir, "todo-checklist.md"),
+        "research_synthesis": os.path.join(output_dir, "research-synthesis.md"),
+        "research_synthesis_ko": os.path.join(output_dir, "research-synthesis.ko.md"),
+        "core_message": os.path.join(output_dir, "core-message.md"),
+        "core_message_ko": os.path.join(output_dir, "core-message.ko.md"),
+        "sermon_outline": os.path.join(output_dir, "sermon-outline.md"),
+        "sermon_outline_ko": os.path.join(output_dir, "sermon-outline.ko.md"),
+        "sermon_draft": os.path.join(output_dir, "sermon-draft.md"),
+        "sermon_draft_ko": os.path.join(output_dir, "sermon-draft.ko.md"),
+        "sermon_final": os.path.join(output_dir, "sermon-final.md"),
+        "sermon_final_ko": os.path.join(output_dir, "sermon-final.ko.md"),
+        "review_report": os.path.join(output_dir, "review-report.md"),
+        "review_report_ko": os.path.join(output_dir, "review-report.ko.md"),
+        "research_package": rp,
+        "pacs_logs": os.path.join(output_dir, "pacs-logs"),
+    }
+
+
+def resolve_sermon_context(
+    state_yaml_path: str = "state.yaml",
+    fallback_base: str = "sermon-output",
+) -> dict[str, Any]:
+    """P1 Master: Resolve all sermon paths and state for resume/status.
+
+    Single entry point for /sermon-resume and /sermon-status.
+    The Orchestrator calls this ONCE and receives complete context.
+
+    Normal flow:
+      1. Read state.yaml -> extract sermon.output_dir
+      2. Build deterministic path map from output_dir
+      3. Read session.json -> domain state
+      4. Read todo-checklist.md -> progress calculation
+
+    Fallback flow (state.yaml missing/corrupt):
+      1. find_active_session() -> scan subdirectories
+      2. Continue with normal flow steps 2-4
+
+    P1 Compliance: 100% deterministic. File reads + parsing only.
+    SOT Compliance: Read-only. Modifies nothing.
+
+    Args:
+        state_yaml_path: Path to state.yaml (default: project root)
+        fallback_base: Base directory for fallback scan
+
+    Returns:
+        {
+            "found": bool,
+            "output_dir": str,
+            "session": dict,              # session.json full content
+            "progress": dict,             # get_checklist_progress() result
+            "paths": dict,                # All artifact paths (from _build_sermon_path_map)
+            "translation_state": dict,    # session.json translation_state section
+            "source": str,                # "state_yaml" or "fallback_scan"
+            "error": str | None,
+        }
+    """
+    result: dict[str, Any] = {
+        "found": False,
+        "output_dir": "",
+        "session": {},
+        "progress": {},
+        "paths": {},
+        "translation_state": {},
+        "source": "",
+        "error": None,
+    }
+
+    output_dir = ""
+    source = ""
+
+    # Primary: read state.yaml
+    if os.path.isfile(state_yaml_path):
+        try:
+            import yaml
+        except ImportError:
+            yaml = None  # type: ignore[assignment]
+
+        if yaml is not None:
+            try:
+                with open(state_yaml_path, "r", encoding="utf-8") as f:
+                    state = yaml.safe_load(f)
+                if isinstance(state, dict):
+                    sermon = state.get("workflow", {}).get("sermon", {})
+                    candidate = sermon.get("output_dir", "")
+                    if isinstance(candidate, str) and candidate.strip():
+                        output_dir = candidate.strip()
+                        source = "state_yaml"
+            except Exception:
+                pass  # Fall through to fallback
+
+    # Fallback: scan sermon-output/*/session.json
+    if not output_dir:
+        scan = find_active_session(fallback_base)
+        if scan["found"]:
+            output_dir = scan["session_dir"]
+            source = "fallback_scan"
+
+    if not output_dir:
+        result["error"] = (
+            f"No sermon session found. state.yaml at '{state_yaml_path}' "
+            f"has no sermon.output_dir, and no session.json found in '{fallback_base}/*/'"
+        )
+        return result
+
+    result["output_dir"] = output_dir
+    result["source"] = source
+
+    # Build deterministic path map
+    paths = _build_sermon_path_map(output_dir)
+    result["paths"] = paths
+
+    # Read session.json
+    session_path = paths["session_json"]
+    if os.path.isfile(session_path):
+        try:
+            with open(session_path, "r", encoding="utf-8") as f:
+                result["session"] = json.load(f)
+        except (OSError, json.JSONDecodeError) as e:
+            result["error"] = f"Cannot read session.json: {e}"
+            return result
+    else:
+        result["error"] = f"session.json not found at: {session_path}"
+        return result
+
+    # Extract translation_state
+    result["translation_state"] = result["session"].get("translation_state", {
+        "completed_phases": [],
+        "glossary_terms_added": 0,
+        "glossary_updated_at": None,
+        "failed_translations": [],
+    })
+
+    # Read checklist progress
+    checklist_path = paths["checklist"]
+    result["progress"] = get_checklist_progress(checklist_path)
+
+    result["found"] = True
+    return result

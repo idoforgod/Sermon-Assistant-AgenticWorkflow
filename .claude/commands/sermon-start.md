@@ -22,24 +22,34 @@ Start the Sermon Research Workflow. This command initializes Phase 0 and begins 
 
 1. Load the sermon-orchestrator skill
 2. Detect input mode using `_sermon_lib.detect_input_mode()` if not specified
-3. Create output directory structure via `_sermon_lib.create_output_structure()`
-4. Initialize session.json via `_sermon_lib.generate_session_json()`
-5. Generate 130-step checklist via `_sermon_lib.generate_checklist()`
-6. Initialize state.yaml with sermon workflow fields
-7. Check `user-resource/` for user-provided materials
-8. If Mode A: dispatch `@passage-finder` for candidate passages
-9. If Mode C: dispatch `@series-analyzer` for series context
-10. If Mode B: proceed directly to HITL-1 with provided passage
-11. Present HITL-1 options to user
+3. **P1 Master — single call for all Phase 0 setup**:
+   ```python
+   result = _sermon_lib.initialize_sermon_output(user_input, mode, options)
+   # Creates: output directory (collision-safe), session.json, todo-checklist.md
+   # Returns: output_dir, session_path, checklist_path, state_yaml_sermon
+   ```
+4. Write `result["state_yaml_sermon"]` to state.yaml `workflow.sermon` section
+5. Validate: `_sermon_lib.validate_sermon_sot_schema(state["workflow"]["sermon"])`
+6. Check `user-resource/` for user-provided materials
+7. If Mode A: dispatch `@passage-finder` for candidate passages
+8. If Mode C: dispatch `@series-analyzer` for series context
+9. If Mode B: proceed directly to HITL-1 with provided passage
+10. Present HITL-1 options to user
+
+**CRITICAL**: Do NOT manually call `get_output_dir_name()`, `create_output_structure()`,
+`generate_session_json()`, or `generate_checklist()` individually.
+Use `result["output_dir"]` as the `output_dir` for all subsequent function calls.
 
 ## SOT Initialization
 ```yaml
+# Orchestrator writes result["state_yaml_sermon"] here:
 workflow:
   name: "sermon-research"
   current_step: 1
   status: "running"
   sermon:
     mode: "{detected_mode}"
-    output_dir: "{generated_dir}"
+    output_dir: "{result.output_dir}"  # e.g., "sermon-output/Romans-8-1-10-2026-03-06"
     completed_gates: []
+    srcs_threshold: 70
 ```

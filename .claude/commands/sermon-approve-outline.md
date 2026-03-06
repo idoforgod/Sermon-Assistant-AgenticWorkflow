@@ -6,6 +6,7 @@ Review and approve the sermon outline.
 
 ## Display
 Full sermon outline from @outline-architect.
+- 한국어 번역본 (sermon-outline.ko.md) 병렬 참조
 
 ## Options
 ```
